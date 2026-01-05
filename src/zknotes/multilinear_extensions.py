@@ -1,6 +1,7 @@
 from typing import Optional, Union, List, Dict, Tuple, Set, Callable, Sequence, Any
-from utils import count_calls, print_header, display_aligned
-from utils import RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
+from .utils import count_calls, print_header, display_aligned
+from .utils import RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
+from .sum_check import stringify
 import numpy as np
 from itertools import product
 import random
@@ -12,7 +13,6 @@ from sympy.polys.domains.modularinteger import ModularInteger
 from sympy.polys.domains.finitefield import FiniteField
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Symbol
-from sum_check import stringify
 
 """
 CONSTRUCTING MLE
@@ -186,143 +186,188 @@ CREATE EXAMPLES
 """
 
 def multilinear_extension_example(show_result: bool = True, compare: bool = False):
+    """
+    Interactive demo: build MLEs of functions f : {0,1}^v -> GF(p).
+
+    - EXAMPLE 1 and 2 are fixed defaults over GF(11), v=2.
+    - After that, user can add more examples interactively.
+    - If compare=True, compares consecutive examples when p and v match.
+    """
     mle: List[Poly] = []
     grid: List[np.ndarray] = []
-    pee = []
-    vee = []
-    loop_counter: int = -1
-    carry_on: bool = True
-    while carry_on:
-        loop_counter += 1
-        if loop_counter < 2:
-            print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
+    pee: List[int] = []
+    vee: List[int] = []
+
+    loop_counter: int = 0
+
+    while True:
+        # ----------------------------
+        # Choose (p, v) for this example
+        # ----------------------------
+        if loop_counter in {0, 1}:
             p = 11
             v = 2
+            print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
         else:
-            p = input(f"Enter a prime number p (we will work over GF(p)): ")
-            p = int(p)
-            # Check if p is a prime number
+            print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
+            p = int(input("Enter a prime number p (we will work over GF(p)): ").strip())
             if not isprime(p):
-                raise ValueError("The input 'p' must be a prime number.")
+                print(f"{RED}Invalid input: p must be prime.{RESET}")
+                continue
 
-            v = input(f"Enter a positive integer v (we will extend a function defined on {{0,1}}**v: ")
-            v = int(v)
-            # Check if v is a positive integer
-            if not isinstance(v, int) or v <= 0:
-                raise ValueError("The input 'v' must be a positive integer.")
+            v = int(input("Enter a positive integer v (we extend f : {0,1}^v -> GF(p)): ").strip())
+            if v <= 0:
+                print(f"{RED}Invalid input: v must be a positive integer.{RESET}")
+                continue
 
         pee.append(p)
         vee.append(v)
 
-        # Set the field as GF(p) with symmetric=False
         field = GF(p, symmetric=False)
-        print(f"\nWe work over {field}. We extend a {field}-valued function defined on {{0,1}}**{v} to one defined on {field}**{v}.\n")
 
-        # Initialize a dictionary to store function values for each tuple in {0, 1}^v
-        func_values: Dict[Tuple[int, ...], field] = {}
+        # nicer formatting than **v
+        print(f"\nWe extend a function f : {{0,1}}^{v} -> {field} to a function f̃ : {field}^{v} -> {field}.\n")
 
-        if loop_counter < 2:
-            # Default examples
-            func_values[(0, 0)] = field(1)
-            print(f"The function value for input {(0,0)} is: {1}")
-            func_values[(0, 1)] = field(2)
-            print(f"The function value for input {(0, 0)} is: {2}")
-            func_values[(1, 0)] = field(3)
-            print(f"The function value for input {(0, 0)} is: {3}")
-            func_values[(1, 1)] = field(4) - field(loop_counter)
-            print(f"The function value for input {(0, 0)} is: {4 - loop_counter}")
+        # ----------------------------
+        # Collect function values on {0,1}^v
+        # ----------------------------
+        func_values: Dict[Tuple[int, ...], Any] = {}
+
+        if loop_counter == 0:
+            func_values[(0, 0)] = field(1); print("The function value for input (0, 0) is: 1")
+            func_values[(0, 1)] = field(2); print("The function value for input (0, 1) is: 2")
+            func_values[(1, 0)] = field(3); print("The function value for input (1, 0) is: 3")
+            func_values[(1, 1)] = field(4); print("The function value for input (1, 1) is: 4")
+
+        elif loop_counter == 1:
+            # Slightly different second default so the compare demo is interesting
+            func_values[(0, 0)] = field(1); print("The function value for input (0, 0) is: 1")
+            func_values[(0, 1)] = field(2); print("The function value for input (0, 1) is: 2")
+            func_values[(1, 0)] = field(3); print("The function value for input (1, 0) is: 3")
+            func_values[(1, 1)] = field(3); print("The function value for input (1, 1) is: 3")
+
         else:
-            # Iterate over all binary tuples in {0, 1}^v
             for bitstring in product([0, 1], repeat=v):
-                # Request user input for the value of the function at the current tuple
-                user_input = input(f"Enter the function value for input {bitstring}: ")
-
-                # Validate that the input is an integer
+                user_input = input(f"Enter the function value for input {bitstring}: ").strip()
                 try:
                     user_value = int(user_input)
                 except ValueError:
-                    raise ValueError("The function value must be an integer.")
-
-                # Convert the integer to an element of the field
+                    print(f"{RED}Invalid input: function values must be integers.{RESET}")
+                    break
                 func_values[bitstring] = field(user_value)
-
-        # Define 'explicit_function' based on the dictionary
-        def explicit_function(inputs: Tuple[int, ...]) -> field:
-            if inputs in func_values:
-                return func_values[inputs]
             else:
-                raise ValueError(f"No function value defined for input {inputs}")
+                # only runs if the for-loop did NOT break
+                pass
+            # If the loop broke, restart this example without incrementing loop_counter
+            if len(func_values) != 2**v:
+                continue
 
-        # Run multilinear_extension with the user's field, v, and func=explicit_function
+        def explicit_function(inputs: Tuple[int, ...]):
+            return func_values[inputs]
+
+        # ----------------------------
+        # Compute MLE and (optionally) show grid
+        # ----------------------------
         extended_func = multilinear_extension(field=field, v=v, func=explicit_function)
         mle.append(extended_func)
+
         eval_array = evaluation_array(polynomial=extended_func)
         grid.append(eval_array)
 
         if show_result:
-            X = symbols(f"x_:{v}")
-            X = stringify(X)
-            print(f"\nThe multilinear extension of this function is:\n\n{YELLOW}f̃({X}) = {mle[-1].as_expr()}{RESET}")
+            X = stringify(symbols(f"x_:{v}"))
+            print(f"\nThe multilinear extension of this function is:\n\n{YELLOW}f̃({X}) = {extended_func.as_expr()}{RESET}")
 
         if show_result and v <= 2 and p < 50:
             print(f"\nIn the following array, entry (i,j) is f̃(i,j):\n")
-            print(grid[-1])
+            print(eval_array)
 
-        if loop_counter%2 == 1 and compare:
-            if all(p == pee[-2] for p in pee[-2:]) and all(v == vee[-2] for v in vee[-2:]):
-                p = pee[-2]
-                v = vee[-2]
-                # Initialize a new array with the same shape, using dtype=object to store tuples
-                tuple_array = np.empty(grid[-2].shape, dtype=object)
-                # Fill in the new array with tuples of corresponding elements, converting to native int
-                for index, _ in np.ndenumerate(grid[-2]):
-                    tuple_array[index] = (int(grid[-2][index]), int(grid[-1][index]))
-                print(f"\nThe multilinear extension of the first function ({BLUE}EXAMPLE {loop_counter}{RESET}) is: {YELLOW}{mle[-2].as_expr()}{RESET}.")
-                print(f"\nThe multilinear extension of the second function ({BLUE}EXAMPLE {loop_counter + 1}{RESET}) is: {YELLOW}{mle[-1].as_expr()}{RESET}.")
-                print(f"\nThe multilinear extensions can agree on at most {v*p**(v-1)} out of {p**v} points.")
-                if v <= 2 and p < 50:
-                    print(
-                        f"\nIndeed, they agree on {GREEN}{(grid[-2] == grid[-1]).sum()} points{RESET}, as shown below.")
-                    print(f"\nEntry in row i, column j is a tuple where the first (second) coordinate is the evaluation of the first (second) MLE at (i,j).\n")
-                    # Format and print the array
+        # ----------------------------
+        # Compare consecutive examples if requested and compatible
+        # ----------------------------
+        if compare and len(mle) >= 2:
+            if pee[-1] == pee[-2] and vee[-1] == vee[-2]:
+                p_cmp = pee[-1]
+                v_cmp = vee[-1]
+
+                print(f"\nThe multilinear extension of the first function "
+                      f"({BLUE}EXAMPLE {loop_counter}{RESET}) is: {YELLOW}{mle[-2].as_expr()}{RESET}.")
+                print(f"\nThe multilinear extension of the second function "
+                      f"({BLUE}EXAMPLE {loop_counter + 1}{RESET}) is: {YELLOW}{mle[-1].as_expr()}{RESET}.")
+                print(f"\nThe multilinear extensions can agree on at most {v_cmp * p_cmp**(v_cmp - 1)} "
+                      f"out of {p_cmp**v_cmp} points.")
+
+                if v_cmp <= 2 and p_cmp < 50:
+                    agree = (grid[-2] == grid[-1]).sum()
+                    print(f"\nIndeed, they agree on {GREEN}{agree} points{RESET}, as shown below.\n")
+
+                    tuple_array = np.empty(grid[-2].shape, dtype=object)
+                    for index, _ in np.ndenumerate(grid[-2]):
+                        tuple_array[index] = (int(grid[-2][index]), int(grid[-1][index]))
+
                     for i in range(tuple_array.shape[0]):
                         for j in range(tuple_array.shape[1]):
-                            element = tuple_array[i, j]
-                            if len(set(element)) == 1:  # All elements in the tuple are equal
-                                print(f"{GREEN}{element}{RESET}", end=" ")
-                            else:  # Elements are not all equal
-                                print(f"{RED}{element}{RESET}", end=" ")
-                        print()  # Newline after each row
-                else:
-                    print(
-                        f"\nIndeed, they agree on {(grid[-2] == grid[-1]).sum()} points.")
+                            a, b = tuple_array[i, j]
+                            if a == b:
+                                print(f"{GREEN}{(a, b)}{RESET}", end=" ")
+                            else:
+                                print(f"{RED}{(a, b)}{RESET}", end=" ")
+                        print()
             else:
-                raise ValueError(f"Enter exactly two functions, with the same p and v values.")
+                print(f"\n{YELLOW}Compare skipped: last two examples used different (p, v).{RESET}")
 
-        if loop_counter > 0:
-            again = input("\nAnother example? (y/n)")
-            if again == 'n':
-                carry_on = False
-            else:
-                print(f"\n{BLUE}EXAMPLE {loop_counter + 1 + 1}.{RESET}")
-    # Return the extended function as a Poly over the field
+        # ----------------------------
+        # Prompt to continue (ALWAYS reachable)
+        # ----------------------------
+        again = input("\nAnother example? (y/n) ").strip().lower()
+        loop_counter += 1
+        if again != "y":
+            break
+
     return mle, grid
 
+# def evaluation_array(polynomial: Poly) -> np.ndarray:
+#     """Evaluate a polynomial over all points in GF(p)^v and store in a numpy array."""
+#     F = GF(polynomial.domain.mod, symmetric=False)
+#     v = len(polynomial.gens)
+#     vars = symbols(f"x_:{v}")
+
+#     elements = list(F(a) for a in range(F.mod))
+
+#     shape = (len(elements),) * v
+#     results = np.zeros(shape, dtype=int)
+
+#     for point in product(elements, repeat=v):
+#         eval_result = F(polynomial.eval(dict(zip(vars, point))))
+#         point = [int(x) for x in point]
+#         results[*point] = int(eval_result)
+
+#     return results
 
 def evaluation_array(polynomial: Poly) -> np.ndarray:
-    """Evaluate a polynomial over all points in GF(p)^v and store in a numpy array."""
-    F = GF(polynomial.domain.mod, symmetric=False)
-    v = len(polynomial.gens)
-    vars = symbols(f"x_:{v}")
+    """
+    Evaluate a polynomial over all points in GF(p)^v and store in a numpy array.
 
-    elements = list(F(a) for a in range(F.mod))
+    Important: use `polynomial.gens` (not freshly-created symbols), otherwise SymPy may not
+    substitute/evaluate correctly and can become extremely slow.
+    """
+    F = GF(int(polynomial.domain.mod), symmetric=False)
+    gens = polynomial.gens
+    v = len(gens)
 
+    elements = [F(a) for a in range(F.mod)]
     shape = (len(elements),) * v
     results = np.zeros(shape, dtype=int)
 
+    # Evaluate on every point
     for point in product(elements, repeat=v):
-        eval_result = F(polynomial.eval(dict(zip(vars, point))))
-        point = [int(x) for x in point]
-        results[*point] = int(eval_result)
+        # dict maps the *actual* generators to field elements
+        subs = dict(zip(gens, point))
+        val = polynomial.eval(subs)
+
+        # Ensure we coerce into GF(p) then into int
+        valF = F(val)
+        idx = tuple(int(x) for x in point)
+        results[idx] = int(valF)
 
     return results

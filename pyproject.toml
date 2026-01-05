@@ -17,6 +17,7 @@ dependencies = [
 [project.optional-dependencies]
 colors = ["colorama>=0.4.6"]
 notebook = [
+  "notebook",
   "ipython>=8",
   "ipywidgets>=8",
 ]

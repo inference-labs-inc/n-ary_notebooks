@@ -1,7 +1,7 @@
-notebook
-sympy
-pandas
-matplotlib
-graphviz
-networkx
-pydot
+sympy>=1.12
+numpy>=1.24
+matplotlib>=3.7
+pandas>=2.0
+ipywidgets>=8.0
+jupyter
+colorama>=0.4.6; platform_system=="Windows"

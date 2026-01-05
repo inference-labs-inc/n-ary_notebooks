@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "zknotes"
+version = "0.1.0"
+description = "Interactive zero-knowledge proof notebooks + utilities"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "sympy>=1.12",
+  "pandas>=2.0",
+  "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+colors = ["colorama>=0.4.6"]
+notebook = [
+  "ipython>=8",
+  "ipywidgets>=8",
+]
+
+[project.scripts]
+zknotes = "zknotes._cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

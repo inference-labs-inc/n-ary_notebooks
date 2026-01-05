@@ -1,0 +1,13 @@
+name: zknotes
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - pip
+  - pip:
+      - -e .
+      - sympy>=1.12
+      - pandas>=2.0
+      - matplotlib>=3.7
+      - ipython>=8
+      - ipywidgets>=8

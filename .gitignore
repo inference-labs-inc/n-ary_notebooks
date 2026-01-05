@@ -1,0 +1,23 @@
+# Python packaging/build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+__pypackages__/
+pip-wheel-metadata/
+*.whl
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# OS/editor
+.DS_Store
+.idea/
+
+# Python cache
+**/__pycache__/
+
+# Jupyter
+**/.ipynb_checkpoints/

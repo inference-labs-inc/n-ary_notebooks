@@ -5,16 +5,21 @@ from sympy import Symbol, Add, Mul, Pow, preorder_traversal, srepr, Expr, symbol
 from sympy import isprime
 from sympy.polys.domains import GF
 from sympy.polys.domains.finitefield import FiniteField
-from graphviz import Digraph
 import re
-import networkx as nx
 import pydot
 from networkx.drawing.nx_pydot import from_pydot
 from collections import defaultdict
-from utils import print_header, RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
+from .utils import print_header, RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
 import copy
 import random
-from multilinear_extensions import multilinear_extension
+from .multilinear_extensions import multilinear_extension
+try:
+    from graphviz import Digraph
+    import networkx as nx
+except ImportError as e:
+    raise ImportError(
+        "Vizualization requires the 'viz' extra: pip install .[viz]"
+    ) from e
 
 
 class ArithmeticCircuit:

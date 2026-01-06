@@ -326,24 +326,6 @@ def multilinear_extension_example(show_result: bool = True, compare: bool = Fals
 
     return mle, grid
 
-# def evaluation_array(polynomial: Poly) -> np.ndarray:
-#     """Evaluate a polynomial over all points in GF(p)^v and store in a numpy array."""
-#     F = GF(polynomial.domain.mod, symmetric=False)
-#     v = len(polynomial.gens)
-#     vars = symbols(f"x_:{v}")
-
-#     elements = list(F(a) for a in range(F.mod))
-
-#     shape = (len(elements),) * v
-#     results = np.zeros(shape, dtype=int)
-
-#     for point in product(elements, repeat=v):
-#         eval_result = F(polynomial.eval(dict(zip(vars, point))))
-#         point = [int(x) for x in point]
-#         results[*point] = int(eval_result)
-
-#     return results
-
 def evaluation_array(polynomial: Poly) -> np.ndarray:
     """
     Evaluate a polynomial over all points in GF(p)^v and store in a numpy array.

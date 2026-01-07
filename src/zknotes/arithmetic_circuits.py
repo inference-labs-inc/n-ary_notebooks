@@ -13,13 +13,8 @@ from .utils import print_header, RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
 import copy
 import random
 from .multilinear_extensions import multilinear_extension
-try:
-    from graphviz import Digraph
-    import networkx as nx
-except ImportError as e:
-    raise ImportError(
-        "Vizualization requires the 'viz' extra: pip install .[viz]"
-    ) from e
+from graphviz import Digraph
+import networkx as nx
 
 
 class ArithmeticCircuit:

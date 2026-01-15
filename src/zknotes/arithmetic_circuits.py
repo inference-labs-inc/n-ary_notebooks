@@ -175,10 +175,22 @@ class ArithmeticCircuit:
             print(f"{LHS} = {RHS}")
             print("")
 
-    def print_verification_propagation_equation(self, mle: Optional[bool] = None,
-                                                random_selection: Optional[int] = None):
+    def print_verification_propagation_equation(
+        self,
+        mle: Optional[bool] = None,
+        random_selection: Optional[int] = None,
+        *,
+        max_full_check: int = 1000,   # if total z's > this, sample instead of full enumeration
+        sample_limit: int = 1000,     # how many z's to sample in large cases
+        display_limit: int = 100,     # how many equations to print
+        seed: Optional[int] = None,   # set for reproducibility if desired
+    ) -> None:
         if mle is None:
             mle = False
+
+        if seed is not None:
+            random.seed(seed)
+
         if mle:
             W, W_dict, add, mult, F = self.tilde_W, self.W_dict, self.tilde_add, self.tilde_mult, self.field
             print_header(f"Verification of Thaler's identity\n", level=2)
@@ -186,65 +198,196 @@ class ArithmeticCircuit:
             W, W_dict, add, mult, F = self.W, self.W_dict, self.add, self.mult, self.field
             print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2)
 
-        for i in sorted(add.keys(), reverse=True):  # Iterate over layers in descending order
+        # Field size p (GF(p))
+        p = int(self.field.mod)
+
+        # Iterate over layers in descending order
+        for i in sorted(add.keys(), reverse=True):
             print(f"Layer {i}\n".upper())
+
+            # Bit-lengths of gate labels in layers i and i+1
             v = len(next(iter(W_dict[i].keys())))
             w = len(next(iter(W_dict[i + 1].keys())))
 
-            if mle:
-                z_range = list(product(range(self.field.mod), repeat=v))
+            # Total number of z-values to verify for this layer
+            total_z = (p ** v) if mle else (2 ** v)
+
+            # Decide how many to check
+            if random_selection is not None:
+                # User override
+                num_to_check = min(int(random_selection), total_z)
+                sampling_reason = f"(Random selection of {num_to_check} z-values.)\n"
+                use_sampling = True
             else:
-                z_range = list(product([0, 1], repeat=v))
-
-            if random_selection:
-                if random_selection < len(z_range):
-                    print(f"(Random selection of {random_selection} z-values.)\n")
-                z_range = random.sample(z_range, min(random_selection, len(z_range)))
-
-            for z in z_range:
-                if mle:
-                    LHS = F(W[i].eval(z))
+                if total_z > max_full_check:
+                    num_to_check = min(sample_limit, total_z)
+                    sampling_reason = (
+                        f"(There are {total_z} z-values in the domain; "
+                        f"checking all would be slow.\n"
+                        f" We will select {num_to_check} z-values uniformly at random, "
+                        f"and display at most {display_limit} of them.)\n"
+                    )
+                    use_sampling = True
                 else:
-                    LHS = F(W[i](z))
-                LHS = int(LHS)
+                    num_to_check = total_z
+                    sampling_reason = ""
+                    use_sampling = False
 
-                xy_range = list(product(product([0, 1], repeat=w), repeat=2))
+            if sampling_reason:
+                print(sampling_reason)
 
+            # Helper: sample a random z in the correct domain without building product(...)
+            def _random_z():
+                if mle:
+                    # z in F^v, represented as tuple of ints in [0, p-1]
+                    return tuple(random.randrange(p) for _ in range(v))
+                else:
+                    # z in {0,1}^v
+                    return tuple(random.randrange(2) for _ in range(v))
+
+            # Build z iterator
+            if use_sampling:
+                z_iter = (_random_z() for _ in range(num_to_check))
+            else:
+                # Full enumeration is safe (<= max_full_check)
+                if mle:
+                    z_iter = product(range(p), repeat=v)
+                else:
+                    z_iter = product([0, 1], repeat=v)
+
+            # Precompute xy_range once per layer (small: 2^w × 2^w)
+            xy_range = list(product(product([0, 1], repeat=w), repeat=2))
+
+            # Track and print only the first display_limit checks
+            printed = 0
+
+            for z in z_iter:
+                # LHS
+                if mle:
+                    LHS = int(F(W[i].eval(z)))
+                else:
+                    LHS = int(F(W[i](z)))
+
+                # RHS
                 if mle:
                     RHS = sum(
-                        [add[i].eval(z + x + y) * (W[i + 1].eval(x) + W[i + 1].eval(y)) +
-                         mult[i].eval(z + x + y) * W[i + 1].eval(x) * W[i + 1].eval(y)
-                         for x, y in xy_range]
+                        add[i].eval(z + x + y) * (W[i + 1].eval(x) + W[i + 1].eval(y)) +
+                        mult[i].eval(z + x + y) * W[i + 1].eval(x) * W[i + 1].eval(y)
+                        for x, y in xy_range
                     )
                 else:
                     RHS = sum(
-                        [add[i](z + x + y) * (W[i + 1](x) + W[i + 1](y)) +
-                         mult[i](z + x + y) * W[i + 1](x) * W[i + 1](y)
-                         for x, y in xy_range]
+                        add[i](z + x + y) * (W[i + 1](x) + W[i + 1](y)) +
+                        mult[i](z + x + y) * W[i + 1](x) * W[i + 1](y)
+                        for x, y in xy_range
                     )
-                RHS = F(RHS)
-                RHS = int(RHS)
 
-                if LHS == RHS:
-                    correct = f"{GREEN}\u2713{RESET}"  # tick
-                else:
-                    correct = f"{RED}\u2717{RESET}"  # cross
+                RHS = int(F(RHS))
 
-                formatted_tuple = ','.join([f"{z_j}" for z_j in z])
-                if mle:
-                    formatted_LHS = f"W\u0303_{i}({formatted_tuple})"
-                    formatted_RHS = (
-                        f"sum {{ add\u0303_{i}(({formatted_tuple}),x,y) [ W\u0303_{i + 1}(x) + W\u0303_{i + 1}(y) ] + "
-                        f"mult\u0303_{i}({formatted_tuple},x,y) [ W\u0303_{i + 1}(x) W\u0303_{i + 1}(y)] }} over (x,y) in "
-                        f"{{0,1}}^{v} × {{0,1}}^{v}")
-                else:
-                    formatted_LHS = f"W_{i}({formatted_tuple})"
-                    formatted_RHS = (f"sum {{ add_{i}(({formatted_tuple}),x,y) [ W_{i + 1}(x) + W_{i + 1}(y) ] + "
-                                     f"mult_{i}({formatted_tuple},x,y) [ W_{i + 1}(x) W_{i + 1}(y)] }} over (x,y) in "
-                                     f"{{0,1}}^{v} × {{0,1}}^{v}")
+                correct = f"{GREEN}\u2713{RESET}" if LHS == RHS else f"{RED}\u2717{RESET}"
 
-                print(f"{formatted_LHS} = {LHS}, {formatted_RHS} = {RHS} {correct}")
+                # Format z as a tuple with parentheses always (including v=0 -> "()")
+                z_display = "(" + ",".join(str(z_j) for z_j in z) + ")"
+
+                if printed < display_limit:
+                    if mle:
+                        formatted_LHS = f"W\u0303_{i}{z_display}"
+                        formatted_RHS = (
+                            f"sum {{ add\u0303_{i}({z_display},x,y) [ W\u0303_{i + 1}(x) + W\u0303_{i + 1}(y) ] + "
+                            f"mult\u0303_{i}({z_display},x,y) [ W\u0303_{i + 1}(x) W\u0303_{i + 1}(y)] }} over (x,y) in "
+                            f"{{0,1}}^{w} × {{0,1}}^{w}"
+                        )
+                    else:
+                        formatted_LHS = f"W_{i}{z_display}"
+                        formatted_RHS = (
+                            f"sum {{ add_{i}({z_display},x,y) [ W_{i + 1}(x) + W_{i + 1}(y) ] + "
+                            f"mult_{i}({z_display},x,y) [ W_{i + 1}(x) W_{i + 1}(y)] }} over (x,y) in "
+                            f"{{0,1}}^{w} × {{0,1}}^{w}"
+                        )
+
+                    print(f"{formatted_LHS} = {LHS}, {formatted_RHS} = {RHS} {correct}")
+                    printed += 1
+
+            if num_to_check > display_limit:
+                print(f"\n(Displayed {display_limit} of {num_to_check} checked equations.)")
+
             print("")
+
+    # def print_verification_propagation_equation(self, mle: Optional[bool] = None,
+    #                                             random_selection: Optional[int] = None):
+    #     if mle is None:
+    #         mle = False
+    #     if mle:
+    #         W, W_dict, add, mult, F = self.tilde_W, self.W_dict, self.tilde_add, self.tilde_mult, self.field
+    #         print_header(f"Verification of Thaler's identity\n", level=2)
+    #     else:
+    #         W, W_dict, add, mult, F = self.W, self.W_dict, self.add, self.mult, self.field
+    #         print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2)
+
+    #     for i in sorted(add.keys(), reverse=True):  # Iterate over layers in descending order
+    #         print(f"Layer {i}\n".upper())
+    #         v = len(next(iter(W_dict[i].keys())))
+    #         w = len(next(iter(W_dict[i + 1].keys())))
+
+    #         if mle:
+    #             z_range = list(product(range(self.field.mod), repeat=v))
+    #         else:
+    #             z_range = list(product([0, 1], repeat=v))
+
+    #         if random_selection:
+    #             if random_selection < len(z_range):
+    #                 print(f"(Random selection of {random_selection} z-values.)\n")
+    #             z_range = random.sample(z_range, min(random_selection, len(z_range)))
+
+    #         for z in z_range:
+    #             if mle:
+    #                 LHS = F(W[i].eval(z))
+    #             else:
+    #                 LHS = F(W[i](z))
+    #             LHS = int(LHS)
+
+    #             xy_range = list(product(product([0, 1], repeat=w), repeat=2))
+
+    #             if mle:
+    #                 RHS = sum(
+    #                     [add[i].eval(z + x + y) * (W[i + 1].eval(x) + W[i + 1].eval(y)) +
+    #                      mult[i].eval(z + x + y) * W[i + 1].eval(x) * W[i + 1].eval(y)
+    #                      for x, y in xy_range]
+    #                 )
+    #             else:
+    #                 RHS = sum(
+    #                     [add[i](z + x + y) * (W[i + 1](x) + W[i + 1](y)) +
+    #                      mult[i](z + x + y) * W[i + 1](x) * W[i + 1](y)
+    #                      for x, y in xy_range]
+    #                 )
+    #             RHS = F(RHS)
+    #             RHS = int(RHS)
+
+    #             if LHS == RHS:
+    #                 correct = f"{GREEN}\u2713{RESET}"  # tick
+    #             else:
+    #                 correct = f"{RED}\u2717{RESET}"  # cross
+
+    #             formatted_tuple = ','.join([f"{z_j}" for z_j in z])
+    #             z_display = f"({formatted_tuple})"  # always show parentheses; for v=0 this becomes "()"
+
+    #             if mle:
+    #                 formatted_LHS = f"W\u0303_{i}{z_display}"
+    #                 formatted_RHS = (
+    #                     f"sum {{ add\u0303_{i}({z_display},x,y) [ W\u0303_{i + 1}(x) + W\u0303_{i + 1}(y) ] + "
+    #                     f"mult\u0303_{i}({z_display},x,y) [ W\u0303_{i + 1}(x) W\u0303_{i + 1}(y)] }} over (x,y) in "
+    #                     f"{{0,1}}^{w} × {{0,1}}^{w}"
+    #                 )
+    #             else:
+    #                 formatted_LHS = f"W_{i}{z_display}"
+    #                 formatted_RHS = (
+    #                     f"sum {{ add_{i}({z_display},x,y) [ W_{i + 1}(x) + W_{i + 1}(y) ] + "
+    #                     f"mult_{i}({z_display},x,y) [ W_{i + 1}(x) W_{i + 1}(y)] }} over (x,y) in "
+    #                     f"{{0,1}}^{w} × {{0,1}}^{w}"
+    #                 )
+
+    #             print(f"{formatted_LHS} = {LHS}, {formatted_RHS} = {RHS} {correct}")
+    #         print("")
 
 """
 START: CONSTRUCT ARITHMETIC CIRCUIT FROM STRING EXPRESSION
@@ -774,6 +917,15 @@ START: PARTITIONING ARITHMETIC CIRCUIT INTO LAYERS, LABELING GATES WITH BITSTRIN
 START: WIRING PREDICATES
 """
 
+def format_wiring_key(key, s_i, s_ip1):
+    """
+    Format a flattened wiring key as ((c),(a),(b)).
+    """
+    c = key[:s_i]
+    a = key[s_i : s_i + s_ip1]
+    b = key[s_i + s_ip1 :]
+    return f"({tuple(c)}, {tuple(a)}, {tuple(b)})"
+
 def construct_W_and_wiring_dicts(
     machine_id_graph: nx.DiGraph,
     id_mapping: Dict[str, str],
@@ -848,16 +1000,18 @@ def construct_W_and_wiring_dicts(
                         )
                     parent_values.append(W_dict[layer + 1][parent_bitstring])
 
+                # Normalize parent order so that parent_bitstrings[0] <= parent_bitstrings[1]
+                if parent_bitstrings[0] > parent_bitstrings[1]:
+                    parent_bitstrings[0], parent_bitstrings[1] = parent_bitstrings[1], parent_bitstrings[0]
+                    parent_values[0], parent_values[1] = parent_values[1], parent_values[0]
+
                 # Compute the value for the current node
                 if operation == '+':
-                    value = sum(parent_values)
+                    value = parent_values[0] + parent_values[1]
                     key = (bitstring,) + parent_bitstrings[0] + parent_bitstrings[1]
                     add_dict[layer][key] = 1
                 elif operation == '×':
-                    product_value = 1
-                    for v in parent_values:
-                        product_value *= v
-                    value = product_value
+                    value = parent_values[0] * parent_values[1]
                     key = (bitstring,) + parent_bitstrings[0] + parent_bitstrings[1]
                     mult_dict[layer][key] = 1
                 else:

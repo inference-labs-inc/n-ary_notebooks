@@ -278,24 +278,63 @@ def save_df(
         print(f"Unsupported file extension: {ext}. Please use csv, xlsx, html, json, png, or txt.")
 
 
-def print_header(header: str, level: Optional[int] = None) -> None:
-    if level is None or level == 1:
-        length = len(header)
-        output = "\n".join(["", "=" * length, header.upper(), "=" * length, ""])
+def print_header(title: str, level: int = 1, *, out: Optional[TerminalOutput] = None) -> None:
+    """
+    Print a section header, using TerminalOutput paging if provided.
+
+    level=1: big header with "=" bars above and below
+    level=2: smaller header (no bars)
+    """
+    printer = out.print if out is not None else print
+
+    # How many lines will this header occupy (conservative)?
+    # We print a leading blank line via "\n..." in the first print call.
+    if level == 1:
+        # blank line + 3 lines (bar/title/bar) = ~4 lines
+        min_lines = 5  # slightly conservative to avoid edge cases
     else:
-        output = header.upper()
-    print(f"{PINK}{output}{RESET}")
+        # blank line + 1 line = ~2 lines
+        min_lines = 2
+
+    if out is not None:
+        out.new_section(min_lines=min_lines)
+
+        # Print the header without paging mid-header
+        with out.atomic():
+            _print_header_block(printer, title, level)
+    else:
+        _print_header_block(printer, title, level)
 
 
-def display_aligned(*strings: str) -> None:
+def _print_header_block(printer, title: str, level: int) -> None:
+    t = title.strip()
+    if level == 1:
+        line = "=" * len(t)
+        printer(f"\n{PINK}{line}{RESET}")
+        printer(f"{PINK}{t.upper()}{RESET}")
+        printer(f"{PINK}{line}{RESET}")
+    else:
+        printer(f"\n{PINK}{t.upper()}{RESET}")
+
+def display_aligned(*strings: str, out=None) -> None:
+    """
+    Print strings containing '=' aligned on the '=' sign.
+    If no string contains '=', prints all strings as-is.
+
+    If `out` is provided, uses `out.print(...)` instead of built-in print
+    (so paging behaves consistently).
+    """
+    printer = out.print if out is not None else print
+
     parts = [s.split("=", 1) for s in strings if "=" in s]
     if not parts:
         for s in strings:
-            print(s)
+            printer(s)
         return
+
     max_left_length = max(len(part[0].strip()) for part in parts)
     for left, right in parts:
-        print(f"{left.strip():>{max_left_length}} = {right.strip()}")
+        printer(f"{left.strip():>{max_left_length}} = {right.strip()}")
 
 
 def count_calls(func):

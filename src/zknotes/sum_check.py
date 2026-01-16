@@ -16,11 +16,15 @@ from sympy.core.numbers import Integer
 from sympy.core.symbol import Symbol
 import random
 
+from .terminal_output import out
+
 def choose_polynomial(
     field: Optional[Domain] = None,
     custom_message: Union[None, str] = None,
     variable_names: Union[None, list] = None,
-    prompt_for_k: bool = True,          # NEW
+    prompt_for_k: bool = True,
+    *,
+    out: TerminalOutput = out,  
 ) -> Union[None, Poly]:
     """
     Prompts the user to define a finite field and input a polynomial over that field.
@@ -46,22 +50,19 @@ def choose_polynomial(
         ValueError: If the input prime or exponent cannot be converted to an integer,
                     or if the provided field is not a prime field.
     """
-    # -----------------------
-    # Field selection/creation
-    # -----------------------
     if field is None:
-        p = input("Enter a prime p:")
+        p = out.input("\nEnter a prime p:")
         try:
             p = int(p)
         except ValueError:
             raise ValueError("Invalid input: p must be an integer.")
 
         if not isprime(p):
-            print("Invalid input: p must be prime.")
+            out.print("Invalid input: p must be prime.")
             return None
 
         if prompt_for_k:
-            k = input("Enter an exponent k (the field will have order p**k):")
+            k = out.input("Enter an exponent k (the field will have order p**k):")
             try:
                 k = int(k)
             except ValueError:
@@ -70,22 +71,17 @@ def choose_polynomial(
             k = 1
 
         if k > 1:
-            # SymPy doesn't seem to support GF(p^k) for k>1 in the way we want here.
             raise ValueError("Sorry, we're using SymPy and can only handle prime fields at present (k must be 1).")
 
         field = GF(p, symmetric=False)
 
     else:
-        # Use provided field, but enforce prime field for now.
         if getattr(field, "mod", None) is None:
             raise ValueError("Provided domain does not look like a prime field with attribute .mod.")
         if not isprime(field.mod):
             raise ValueError("Sorry, we're using SymPy and can only handle prime fields at present.")
         field = GF(field.mod, symmetric=False)
 
-    # -----------------------
-    # Polynomial input
-    # -----------------------
     if custom_message:
         prompt = custom_message
     else:
@@ -94,9 +90,8 @@ def choose_polynomial(
             f"(e.g. 2*X_0**2 + X_0*X_1*X_2 + X_1*X_4**3 + X_1 + X_3):"
         )
 
-    poly_str = input(prompt)
+    poly_str = out.input(prompt)
 
-    # Identify variable names (e.g., X_0, X_1) in the polynomial string
     detected_variables = set(re.findall(r"X_\d+", poly_str))
 
     if variable_names is not None:
@@ -104,16 +99,12 @@ def choose_polynomial(
     else:
         variable_names = sorted(detected_variables) if detected_variables else ["X_0"]
 
-    # Define symbols for each variable in the polynomial
     variables = symbols(variable_names)
     variable_map = {name: var for name, var in zip(variable_names, variables)}
 
-    # Convert the polynomial string to a SymPy expression
     poly_expr = sympify(poly_str, locals=variable_map)
 
-    # Return the polynomial as a Poly object over the finite field
     return Poly(poly_expr, variables, domain=field)
-
 
 def is_multilinear(poly: Poly) -> bool:
     # Check if the degree of each variable in every term is at most 1
@@ -122,7 +113,7 @@ def is_multilinear(poly: Poly) -> bool:
             return False
     return True
 
-def total_degree_example() -> None:
+def total_degree_example(out=out) -> None:
     loop_counter: int = 0
     carry_on: bool = True
     while carry_on:
@@ -136,20 +127,20 @@ def total_degree_example() -> None:
 
         multilinear: str = 'multilinear' if is_multilinear(g) else 'non-multilinear'
         X_tuple = ', '.join([str(X) for X in g.gens])
-        print(
+        out.print(
             f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET} The polynomial \n\n"
             f"g({X_tuple}) = {g.as_expr()} \n\n"
             f"is a {multilinear} polynomial in {g.domain}[{X_tuple}]."
         )
-        print(f"\nThe total degree of g is deg(g) = {g.total_degree()}")
+        out.print(f"\nThe total degree of g is deg(g) = {g.total_degree()}")
         for X in g.gens:
-            print(f"\nThe degree of {X} in g is deg_{X}(g) = {degree(g, X)}.")
-        again = input("\nAnother example? (y/n)")
+            out.print(f"\nThe degree of {X} in g is deg_{X}(g) = {degree(g, X)}.")
+        again = out.input("\nAnother example? (y/n)")
         loop_counter += 1
         if again == 'n':
             carry_on = False
         else:
-            print("")
+            out.print("")
 
 
 def roots(poly: Poly, time_out: Optional[float] = 60) -> Tuple[Set[Tuple[int, ...]], bool]:
@@ -226,15 +217,15 @@ def _fmt_prob_fraction(num_roots: int, p: int, v: int) -> str:
 
 def _fmt_sz_bound(d: int, p: int) -> str:
     """
-    Format the Schwartz–Zippel upper bound d/|F| as exact fraction plus decimal.
+    Format the Schwartz-Zippel upper bound d/#F as exact fraction plus decimal.
     """
     bound = d / p
     return f"{d}/{p} = {bound}"
 
 
-def roots_example(time_out: Optional[float] = None) -> None:
+def roots_example(time_out: Optional[float] = None, out=out) -> None:
     """
-    Interactive demo of Schwartz–Zippel: count roots (exactly if feasible, otherwise partially).
+    Interactive demo of Schwartz-Zippel: count roots (exactly if feasible, otherwise partially).
 
     - Prints the ambient space as (GF(p))^(v) to avoid confusion with extension fields.
     - When enumeration completes, compares observed probability to the SZ bound (with if/then).
@@ -269,28 +260,28 @@ def roots_example(time_out: Optional[float] = None) -> None:
 
         # --- Header + probability statement ---
         if ran_out_of_time:
-            print(
+            out.print(
                 f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET} "
                 f"In {GREEN}{time_out} seconds{RESET}, we found {len(zeros)} roots of {g.as_expr()} in {space_str}."
             )
-            print(f"\n{GREEN}There may be more roots, so what follows is not a verification of Schwartz–Zippel.{RESET}")
-            print(
+            out.print(f"\n{GREEN}There may be more roots, so what follows is not a verification of Schwartz-Zippel.{RESET}")
+            out.print(
                 f"\nThus, if each of {r_tuple} is chosen independently and uniformly at random from {g.domain}, "
                 f"then g({r_tuple}) = 0 with probability {GREEN}at least{RESET} {lhs_str} "
-                f"(this is a lower bound). Schwartz–Zippel gives an upper bound."
+                f"(this is a lower bound). Schwartz-Zippel gives an upper bound."
             )
         else:
-            print(
+            out.print(
                 f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET} "
                 f"The polynomial {g.as_expr()} has {len(zeros)} roots in {space_str}."
             )
-            print(
+            out.print(
                 f"\nThus, if each of {r_tuple} is chosen independently and uniformly at random from {g.domain}, "
                 f"then g({r_tuple}) = 0 with probability {lhs_str}."
             )
 
         # --- Degree + SZ bound ---
-        print(f"\nThe polynomial has total degree d = {d}, and the Schwartz–Zippel bound is {rhs_str}.")
+        out.print(f"\nThe polynomial has total degree d = {d}, and the Schwartz-Zippel bound is {rhs_str}.")
 
         # If we enumerated all roots, compare observed probability to the bound.
         if not ran_out_of_time:
@@ -303,24 +294,24 @@ def roots_example(time_out: Optional[float] = None) -> None:
                 rel = "above"
             else:
                 rel = "equal to (within rounding)"
-            print(f"\nObserved probability is {rel} the Schwartz–Zippel upper bound.")
+            out.print(f"\nObserved probability is {rel} the Schwartz-Zippel upper bound.")
 
         # --- Print some roots ---
         truncate: int = 10
         if len(zeros) > truncate:
-            print(f"\nHere are {truncate} of the roots:\n")
+            out.print(f"\nHere are {truncate} of the roots:\n")
             to_print = [f"g{z} = 0" for z in zeros[:truncate]]
         else:
             if ran_out_of_time:
-                print(f"\nHere are the roots we found before running out of time:\n")
+                out.print(f"\nHere are the roots we found before running out of time:\n")
             else:
-                print(f"\nHere are the roots:\n")
+                out.print(f"\nHere are the roots:\n")
             to_print = [f"g{z} = 0" for z in zeros]
 
-        display_aligned(*to_print)
+        display_aligned(*to_print, out=out)
 
         # --- Continue? ---
-        again = input("\nAnother example? (y/n) ").strip().lower()
+        again = out.input("\nAnother example? (y/n) ").strip().lower()
         loop_counter += 1
         if again == "n":
             carry_on = False
@@ -329,11 +320,13 @@ def roots_example(time_out: Optional[float] = None) -> None:
 SUM CHECK PROTOCOL
 """
 
-def sum_check_example() -> None:
+def sum_check_example(out=out) -> None:
     loop_counter: int = 0
     carry_on: bool = True
     while carry_on:
-        print(f"{BLUE}EXAMPLE {loop_counter + 1}.{RESET} ")
+        if hasattr(out, "flush"):
+            out.flush()
+        out.print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET} ")
         if loop_counter == 0:
             # Default example
             v: int = 3
@@ -354,13 +347,12 @@ def sum_check_example() -> None:
             )
         else:
             sum_check()
-        again = input("\nAnother example? (y/n)")
+        again = out.input("\nAnother example? (y/n)").strip().lower()
         loop_counter += 1
         if again == 'n':
             carry_on = False
 
-
-def sum_check() -> Optional[bool]:
+def sum_check(out=out) -> Optional[bool]:
     """
     Sets up and initiates the sum-check protocol using user input and interactive choices.
 
@@ -381,6 +373,11 @@ def sum_check() -> Optional[bool]:
     """
     # Reset call count at the start of a new protocol run
     sum_check_recursion.call_count = 0
+    
+    # Start fresh so the first header doesn't appear mid-page
+    if hasattr(out, "flush"):
+        out.flush()
+    
     # Get the polynomial from the user
     multivariate_init = choose_polynomial(prompt_for_k=False)
     if multivariate_init is None:
@@ -388,22 +385,22 @@ def sum_check() -> Optional[bool]:
 
     # Check if the field is of prime order
     if not isprime(multivariate_init.domain.mod):
-        print("Sorry, we can only handle prime fields at present.")
+        out.print("Sorry, we can only handle prime fields at present.")
         return None  # Exit if the field is non-prime
 
     # Prompt user for interactive mode
-    interactive_input = input("\nDo you want this to be interactive? (y/n): ")
+    interactive_input = out.input("\nDo you want this to be interactive? (y/n): ")
     user_input = interactive_input.lower() == 'y'
     # Initialize user_is_verifier and user_is_prover booleans as False (will update according to user responses below)
     user_is_verifier: bool = False
     user_is_prover: bool = False
     if user_input:
-        user_selection_verifier = input("Do you want to act as verifier? (y/n): ")
-        user_selection_prover = input("Do you want to act as prover? (y/n): ")
+        user_selection_verifier = out.input("Do you want to act as verifier? (y/n): ")
+        user_selection_prover = out.input("Do you want to act as prover? (y/n): ")
         user_is_verifier = user_selection_verifier.lower() == 'y'
         user_is_prover = user_selection_prover.lower() == 'y'
     if not user_is_prover:
-        dishonesty_selection = input("Choose a, b, or c: Prover "
+        dishonesty_selection = out.input("Choose a, b, or c: Prover "
                                      "(a) will lie. "
                                      "(b) will lie with probability 1/2. "
                                      "(c) will not lie.")
@@ -435,7 +432,8 @@ def sum_check() -> Optional[bool]:
         user_H_star, skip = sum_check_steps(g_init=multivariate_init,
                                             H_star=H,
                                             user_is_verifier=user_is_verifier,
-                                            user_is_prover=user_is_prover,)
+                                            user_is_prover=user_is_prover,
+                                            out=out,)
         user_H_star = int(user_H_star)
         H_star = F.convert(user_H_star)
         if H_star == H:
@@ -449,9 +447,9 @@ def sum_check() -> Optional[bool]:
     # If prover is attempting to deceive, choose a different value for H_star
     if not user_is_prover and dishonest[-1]:
         while H_star == H:
-            H_star = random_field_element(field=F, user_input=False)
+            H_star = random_field_element(field=F, user_input=False, out=out,)
     # Call the recursive sum-check protocol
-    return sum_check_recursion(
+    result = sum_check_recursion(
         g_init=multivariate_init,
         g=multivariate_init,
         H_star=H_star,
@@ -461,6 +459,9 @@ def sum_check() -> Optional[bool]:
         show_steps=True,
         skip_show_step=skip,
     )
+    if hasattr(out, "flush"):
+        out.flush()
+    return result
 
 @count_calls
 def sum_check_recursion(
@@ -520,7 +521,9 @@ def sum_check_recursion(
                             r=r,
                             dishonest=dishonest,
                             user_is_prover=user_is_prover,
-                            final_check=True)
+                            final_check=True,
+                            out=out,)
+            out.flush()
         # Check if the final evaluated polynomial matches the original claim
         return H_star == F(g_init.eval({g_init.gens[k]: r_ for k, r_ in enumerate(r)}))
 
@@ -555,7 +558,8 @@ def sum_check_recursion(
                                        dishonest=dishonest,
                                        user_is_verifier=user_is_verifier,
                                        user_is_prover=user_is_prover,
-                                       skip=skip_show_step, )
+                                       skip=skip_show_step, 
+                                       out=out,)
         else:
             sum_check_steps(g_init=g_init,
                             g_0_star=g_0_star,
@@ -564,7 +568,8 @@ def sum_check_recursion(
                             dishonest=dishonest,
                             user_is_verifier=user_is_verifier,
                             user_is_prover=user_is_prover,
-                            skip=skip_show_step,)
+                            skip=skip_show_step,
+                            out=out,)
     # Verify degree consistency
     j = sum_check_recursion.call_count
     d = g_0.degree(g_init.gens[j])
@@ -575,7 +580,7 @@ def sum_check_recursion(
     if F(H_star) == F(g_0_star.eval({X[0]: F(0)}) + g_0_star.eval({X[0]: F(1)})):
         # Generate a new challenge if verification passed
         verifier_prompt = f"\nAs verifier, choose an element of {F} uniformly at random, independent of any previous choice:" if user_is_verifier else None
-        challenge = random_field_element(field=F, user_input=user_is_verifier, custom_message=verifier_prompt)
+        challenge = random_field_element(field=F, user_input=user_is_verifier, custom_message=verifier_prompt, out=out,)
         r.append(challenge)  # Add challenge to the list
         H_star = g_0_star.eval({X[0]: F(challenge)})  # Update H with new evaluation
         if dishonest and H_star == g_0.eval({X[0]: F(challenge)}):
@@ -605,7 +610,9 @@ def sum_check_steps(
     user_is_verifier: bool = False,
     user_is_prover: bool = False,
     skip: bool = False,
-) -> None:
+    *,
+    out: TerminalOutput = out,
+) -> Union[None, Tuple[str, bool], Poly]:
     """
     Displays and guides through the detailed reasoning steps of each round in the sum-check protocol.
 
@@ -627,47 +634,47 @@ def sum_check_steps(
     # Final verification (unchanged logic, improved phrasing)
     # ----------------------------
     if final_check and r:
-        print_header("\nFinal check", level=2)
+        print_header("\nFinal check", level=2, out=out)
 
         # "sampled; here r_{v-1} = ..."
         sampled_val = int(F(r[-1]))
-        print(f"\nV samples an element uniformly at random from {F}; here r_{v - 1} = {sampled_val}.")
+        out.print(f"\nV samples an element uniformly at random from {F}; here r_{v - 1} = {sampled_val}.")
 
         if user_is_prover and len(dishonest) > 1 and dishonest[-2] is True and dishonest[-1] is False:
-            print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")
-            print(
+            out.print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")
+            out.print(
                 f"\n{RED}YOU HAVE SUCCESSFULLY DECEIVED THE VERIFIER: "
                 f"g*_{j-1}({int(r[-1])}) = g_{j-1}({int(r[-1])}){RESET}"
             )
-            print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
+            out.print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
 
         r_ = stringify(r)
         LHS = f"g*_{j - 1}({to_string(r[j - 1])})"
         RHS = f"g({r_})"
         from_oracle = int(F(g_init.eval({g_init.gens[k]: r_ for k, r_ in enumerate(r)})))
 
-        print(f"\nIf all of P's claims are true, then\n\n{LHS} = {RHS}.")
-        print(f"\nV computes\n\n{LHS} = {H_star}.")
+        out.print(f"\nIf all of P's claims are true, then\n\n{LHS} = {RHS}.")
+        out.print(f"\nV computes\n\n{LHS} = {H_star}.")
 
-        print(
+        out.print(
             f"\nFinally, V queries an oracle for g (or verifies an opening of a binding commitment to g) "
             f"to obtain\n\n{RHS} = {from_oracle}."
         )
 
         if F.convert(H_star) == F.convert(from_oracle):
-            print(f"\nP passes the final verification, and V {GREEN}ACCEPTS{RESET} P's initial claim that H = H*.")
+            out.print(f"\nP passes the final verification, and V {GREEN}ACCEPTS{RESET} P's initial claim that H = H*.")
             H = F(sum(g_init.eval({X[k]: b_k for k, b_k in enumerate(bb)})
                       for bb in product([F(0), F(1)], repeat=v)))
             if dishonest and dishonest[0]:
-                print(f"\n{RED}P HAS DECEIVED V: THE TRUE VALUE OF H IS IN FACT {int(H)}.{RESET}")
+                out.print(f"\n{RED}P HAS DECEIVED V: THE TRUE VALUE OF H IS IN FACT {int(H)}.{RESET}")
                 # Meta line: highlight that acceptance was a low-probability event.
-                print(
+                out.print(
                     f"\n{YELLOW}P GOT LUCKY:{RESET} the final random check happened not to expose the inconsistency "
                     f"this time. Over a large field, this success event should be rare."
                 )
         else:
-            print(f"\nP fails the final verification, and V {RED}REJECTS{RESET} P's initial claim that H = H*.")
-            print(
+            out.print(f"\nP fails the final verification, and V {RED}REJECTS{RESET} P's initial claim that H = H*.")
+            out.print(
                 f"\n(Interpretation: P can often keep the transcript locally consistent round-by-round, "
                 f"but the final random evaluation ties the transcript to the true g and typically catches a lie.)"
             )
@@ -677,30 +684,30 @@ def sum_check_steps(
     # Initialization (only when r empty and not skipped)
     # ----------------------------
     if not r and not skip:
-        print_header("Initialization")
-        print(f"Let\n\ng({X_}) = {g_init.as_expr()}.")
+        print_header("Initialization", out=out)
+        out.print(f"\nLet\n\ng({X_}) = {g_init.as_expr()}.")
 
         # Clarify demo vs protocol model
-        print(
+        out.print(
             f"\n(In this demo we display g for the reader. In the protocol, V does not receive g explicitly; "
             f"V only has oracle/committed evaluation access to g.)"
         )
 
-        print(f"\nV does not know g, but does know that it is a polynomial over {F} in {v} indeterminates.")
-        print(f"\nV also knows an upper bound for the degree of each indeterminate in g.")
-        print(f"\nLet\n\nH := sum g({b_}) over ({b_}) in {{0,1}}^{v}.")
+        out.print(f"\nV does not know g, but does know that it is a polynomial over {F} in {v} indeterminates.")
+        out.print(f"\nV also knows an upper bound for the degree of each indeterminate in g.")
+        out.print(f"\nLet\n\nH := sum g({b_}) over ({b_}) in {{0,1}}^{v}.")
 
         if user_is_prover:
-            user_H_star = input(
+            user_H_star = out.input(
                 f"\nAs prover, enter your claim H* for the value of H (the true value is {int(H_star)}):"
             )
             skip = True
             return user_H_star, skip
         else:
             # Fix "P claims that and H..."
-            print(f"\nP claims that H = H*, where H* = {int(F(H_star))}.")
+            out.print(f"\nP claims that H = H*, where H* = {int(F(H_star))}.")
             if dishonest and dishonest[0]:
-                print(
+                out.print(
                     "\n(For this run, P's initial claim H* is intentionally false, and P will try to get away with it.)")
 
     # ----------------------------
@@ -708,97 +715,97 @@ def sum_check_steps(
     # ----------------------------
     if r:
         sampled_val = int(F(r[-1]))
-        print(f"\nV samples an element uniformly at random from {F}; here r_{j - 1} = {sampled_val}.")
+        out.print(f"\nV samples an element uniformly at random from {F}; here r_{j - 1} = {sampled_val}.")
         if user_is_prover and len(dishonest) > 1 and dishonest[-2] is True and dishonest[-1] is False:
-            print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")
-            print(
+            out.print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")
+            out.print(
                 f"\n{RED}YOU HAVE SUCCESSFULLY DECEIVED THE VERIFIER: "
                 f"g*_{j}({int(r[-1])}) = g_{j}({int(r[-1])}){RESET}"
             )
-            print(f"\n{RED}From now on, the g*_j will automatically be set to g_j.{RESET}")
-            print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
+            out.print(f"\n{RED}From now on, the g*_j will automatically be set to g_j.{RESET}")
+            out.print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
 
     # ----------------------------
     # Round header and definition of g_j
     # ----------------------------
-    print_header(f"Round {j}")
+    print_header(f"Round {j}", out=out)
     mixed_input = stringify(r[:j], [X[j]], b[j + 1:])
     if v - 1 - j > 0:
-        print(
-            f"Let\n\ng_{j}({str(X[j])}) := sum g({mixed_input}) over ({stringify(b[j + 1:])}) in {{0,1}}^{v - 1 - j}"
+        out.print(
+            f"\nLet\n\ng_{j}({str(X[j])}) := sum g({mixed_input}) over ({stringify(b[j + 1:])}) in {{0,1}}^{v - 1 - j}"
         )
     else:
-        print(f"Let\n\ng_{j}({str(X[j])}) := g({mixed_input})")
+        out.print(f"\nLet\n\ng_{j}({str(X[j])}) := g({mixed_input})")
 
     # ----------------------------
     # Prover-hidden advice block (kept, only tiny textual changes)
     # ----------------------------
     if user_is_prover and dishonest[-1]:
-        print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")
-        print(f"\nIn fact, \n\n{GREEN}g_{j}({str(X[j])}) = {g_0.as_expr()}{RESET}.")
-        print(
+        out.print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")
+        out.print(f"\nIn fact, \n\n{GREEN}g_{j}({str(X[j])}) = {g_0.as_expr()}{RESET}.")
+        out.print(
             f"\nYour goal is to convince V that the polynomial g*_{j} you're about to send is g_{j} (a false claim)."
         )
-        print(f"\nV will check that:")
-        print(f"\n(a) deg(g*_{j}) ≤ deg_{j}(g) = {d}")
-        print(f"\n(b) g*_{j}(0) + g*_{j}(1) = {int(H_star)}")
-        print(
+        out.print(f"\nV will check that:")
+        out.print(f"\n(a) deg(g*_{j}) ≤ deg_{j}(g) = {d}")
+        out.print(f"\n(b) g*_{j}(0) + g*_{j}(1) = {int(H_star)}")
+        out.print(
             f"\nIf it turns out that"
             f"\n(c) g*_{j}(r_{j}) = g_{j}(r_{j}), where r_{j} is the random element of {F} that V will sample next,"
         )
-        print(
+        out.print(
             f"\nthen V will accept your original claim if you send the 'true' polynomials g*_k = g_k in subsequent rounds."
         )
-        print(
+        out.print(
             f"\nAs you don't know what r_{j} will be, the best you can do is choose g*_{j} satisfying (a) and (b) such that"
         )
-        print(
+        out.print(
             f"\n(d) g*_{j} - g_{j} has as many roots as possible in {F} "
             f"(there can be at most deg(g*_{j} - g_{j}) ≤ {d})."
         )
         if g_0_star and roots_of_g_0_star_minus_g_0:
             roots = [int(z) for z in roots_of_g_0_star_minus_g_0]
             print_roots = ", ".join([f"{YELLOW}{str(z)}{RESET}" for z in roots])
-            print(
+            out.print(
                 f"\nFor example, if{RED}\n\ng*_{j}({str(X[j])}) = {g_0_star.as_expr()}{RESET},\n\nthen (a) and (b) hold, "
                 f"and the roots (in {F}) of g*_{j} - g_{j} are: {print_roots}."
             )
-            print(f"\nThe probability of V sampling one of these roots as the next challenge is "
+            out.print(f"\nThe probability of V sampling one of these roots as the next challenge is "
                   f"{len(roots)}/{F.mod} = {len(roots)/F.mod:.2f}.")
-            print(
-                f"\nIn general, by Schwartz–Zippel, this probability cannot exceed "
+            out.print(
+                f"\nIn general, by Schwartz-Zippel, this probability cannot exceed "
                 f"deg_{j}(g)/#F = {g_init.degree(X[j])}/{F.mod} = {g_init.degree(X[j])/F.mod:.2f}."
             )
-            print(f"\nIn this event, V will ultimately accept the original false claim for the value of H.")
-            print(
+            out.print(f"\nIn this event, V will ultimately accept the original false claim for the value of H.")
+            out.print(
                 f"\nEven if this does not happen, as long as (a) and (b) hold, V will accept in this round "
                 f"and we will have another chance to pull off the deception."
             )
         elif g_0_star:
-            print(
+            out.print(
                 f"\nFor example, if\n\n{RED}g*_{j}({str(X[j])}) = {g_0_star.as_expr()}{RESET},\n\nthen (a) and (b) hold, "
                 f"but g*_{j} - g_{j} has no roots in {F}."
             )
-            print(
+            out.print(
                 f"\nWe are unable to suggest a polynomial satisfying (a) and (b) such that g*_{j} - g_{j} has a root "
                 f"in {F}—perhaps no such polynomial exists."
             )
-            print(
+            out.print(
                 f"\nEven if no such polynomial exists, as long as (a) and (b) hold, V will accept in this round "
                 f"and we will have another chance to pull off the deception."
             )
         else:
-            print(f"\nWe are unable to suggest a polynomial satisfying (a) and (b)—perhaps no such polynomial exists.")
-            print(f"\nIf no such polynomial exists, we've been caught in a lie and V will reject immediately.")
+            out.print(f"\nWe are unable to suggest a polynomial satisfying (a) and (b)—perhaps no such polynomial exists.")
+            out.print(f"\nIf no such polynomial exists, we've been caught in a lie and V will reject immediately.")
 
         prompt = f"\nEnter your g*_{j}({str(X[j])}):"
-        g_0_star = choose_polynomial(field=F, custom_message=prompt, variable_names=[f"X_{j}"], prompt_for_k=False)
-        print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
+        g_0_star = choose_polynomial(field=F, custom_message=prompt, variable_names=[f"X_{j}"], prompt_for_k=False, out=out)
+        out.print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
 
     # ----------------------------
     # Prover's claim in this round
     # ----------------------------
-    print(
+    out.print(
         f"\nP claims that g_{j}({str(X[j])}) = g*_{j}({str(X[j])}), where \n\ng*_{j}({str(X[j])}) = {g_0_star.as_expr()}."
     )
 
@@ -808,39 +815,39 @@ def sum_check_steps(
     else:
         LHS = f"g*_{j - 1}({to_string(r[j - 1])})"
     RHS = f"g*_{j}(0) + g*_{j}(1)"
-    print(f"\nIf P's last two claims are true, then deg(g*_{j}) ≤ deg_{j}(g) and {LHS} = {RHS}.")
+    out.print(f"\nIf P's last two claims are true, then deg(g*_{j}) ≤ deg_{j}(g) and {LHS} = {RHS}.")
 
     # Degree bound check (soundness-relevant)
     if g_0_star.degree() <= d:
-        print(
+        out.print(
             f"\nV checks the degree bound: deg(g*_{j}) = {g_0_star.degree()} ≤ deg_{j}(g) = {d}."
         )
     else:
-        print(
+        out.print(
             f"\nV finds that deg(g*_{j}) = {g_0_star.degree()} > deg_{j}(g) = {d}."
         )
-        print(f"\nV {RED}REJECTS{RESET}.")
+        out.print(f"\nV {RED}REJECTS{RESET}.")
         # Keep going to print consistency check info? Your old code continued; we keep that behavior.
 
     # Consistency check for the sum relation
     if LHS == "H*":
-        print(f"\nP's claim is that H = H* = {int(F(H_star))}. V proceeds to compute:\n")
+        out.print(f"\nP's claim is that H = H* = {int(F(H_star))}. V proceeds to compute:\n")
         computed_rhs = int(F(g_0_star.eval(F(0)) + g_0_star.eval(F(1))))
-        print(f"{RHS} = {computed_rhs}")
-        print(f"\nThis is easy because g*_{j} is given explicitly, so V can evaluate it at 0 and 1.")
+        out.print(f"{RHS} = {computed_rhs}")
+        out.print(f"\nThis is easy because g*_{j} is given explicitly, so V can evaluate it at 0 and 1.")
     else:
-        print("\nV proceeds to compute:\n")
+        out.print("\nV proceeds to compute:\n")
         computed_rhs = int(F(g_0_star.eval(F(0)) + g_0_star.eval(F(1))))
-        display_aligned(f"{LHS} = {int(F(H_star))}", f"{RHS} = {computed_rhs}")
-        print(
+        display_aligned(f"{LHS} = {int(F(H_star))}", f"{RHS} = {computed_rhs}", out=out)
+        out.print(
             f"\nThis is easy because both claimed polynomials are given explicitly, "
             f"and V only needs univariate evaluations at 0 and 1."
         )
 
     if F(H_star) != F(g_0_star.eval(F(0)) + g_0_star.eval(F(1))):
-        print(f"\nV {RED}REJECTS{RESET} upon exposing an inconsistency in P's claims. The protocol terminates.")
+        out.print(f"\nV {RED}REJECTS{RESET} upon exposing an inconsistency in P's claims. The protocol terminates.")
     else:
-        print("\nV sees that P's claims so far are consistent.")
+        out.print("\nV sees that P's claims so far are consistent.")
 
     if user_is_prover and dishonest:
         return g_0_star
@@ -899,7 +906,9 @@ def random_field_element(
     field: FiniteField,
     user_input: bool = False,
     custom_message: Union[None, str] = None,
-    max_attempts: Optional[int] = None
+    max_attempts: Optional[int] = None,
+    *,
+    out: TerminalOutput = out,
 ) -> Optional[ModularInteger]:
     """
         Generates a random element from the finite field.
@@ -923,7 +932,7 @@ def random_field_element(
             - If `user_input` is False, the function generates a random element from the finite field.
         """
     if user_input:
-        user_response = input_random_field_element(custom_message=custom_message, max_attempts=max_attempts)
+        user_response = input_random_field_element(custom_message=custom_message, max_attempts=max_attempts, out=out,)
         if isinstance(user_response, int):
             return field(user_response)
         else:
@@ -932,7 +941,7 @@ def random_field_element(
     return field(random.randint(0, field.mod - 1))
 
 
-def input_random_field_element(custom_message: Union[None, str] = None, max_attempts: Optional[int] = None) -> Optional[int]:
+def input_random_field_element(custom_message: Union[None, str] = None, max_attempts: Optional[int] = None, *, out: TerminalOutput = out) -> Optional[int]:
     """
         Prompts the user to input an integer element from the field.
 
@@ -956,7 +965,7 @@ def input_random_field_element(custom_message: Union[None, str] = None, max_atte
     prompt = custom_message if custom_message is not None else "\nEnter c to cancel or select element uniformly at random from field, independent of any previous selection:"
 
     while attempts is None or (attempts != max_attempts):
-        response = input(prompt)
+        response = out.input(prompt)
         if response == 'c':
             return None
         try:
@@ -966,7 +975,7 @@ def input_random_field_element(custom_message: Union[None, str] = None, max_atte
             if attempts is not None:
                 attempts += 1
                 if attempts == max_attempts:
-                    print("\nInvalid input. No more attempts.")
+                    out.print("\nInvalid input. No more attempts.")
                     return None
                 elif attempts == max_attempts - 1:
                     prompt = "\nInvalid input. Final attempt: enter an integer, or c to cancel:"
@@ -1055,7 +1064,7 @@ def dishonest_polynomial_with_boundary_condition(g_0: Poly,
         d = min(g_0.degree(), p - 1)
     # Deal with some degenerate cases
     if d < 0: # g_0 is the zero polynomial and g_0_star must also be. But we require g_0_star to be distinct from g_0
-        return None, None
+        return None, None, None
     if d == 0: # g_0 is constant (possibly zero) and g_0_start must also be---a different constant.
         if p > 2:
             g_0_star = Poly(H_star / field.convert(2), g_0.gens[0], domain=field)  # So that 2*g_0_star = H_star
@@ -1120,6 +1129,7 @@ def dishonest_polynomial_with_boundary_condition(g_0: Poly,
 
     # Recursive construction of sets of alpha
     best_alpha_list = []  # Track the best (longest) list of alpha
+    out_of_time = False
     if timeout is not None:
         tic = time.time()  # Start timing
     for alpha_0 in range(p):  # Iterate over possible starting points for alpha_0
@@ -1153,6 +1163,7 @@ def dishonest_polynomial_with_boundary_condition(g_0: Poly,
     if timeout:
         return g_0_star, best_alpha_list, out_of_time
     return g_0_star, best_alpha_list, None
+
 def dishonest_polynomial_no_boundary_conditions(g: Poly, max_degree: Union[None, int] = None, random_roots: bool = False) -> Tuple[Union[None, Poly], Union[None, List[Union[int, Any]]]]:
     """
     Given a univariate polynomial g over a finite field F (expected to be GF(p)),
@@ -1195,7 +1206,7 @@ def dishonest_polynomial_no_boundary_conditions(g: Poly, max_degree: Union[None,
     Tuple[Union[None, Poly], Union[None, List[Union[int, Any]]]]
         A tuple where:
         - The first element is either the modified polynomial g* (Poly) or None.
-        - The second element is either the list of roots (as integers or modular integers) or None.
+        - The second element is either the list, as integers or modular integers, of field elements r such that g^*_0(r) = g_0(r) (i.e. the roots of g^*_0 - g_0), or None.
 
     Raises
     ------
@@ -1219,7 +1230,7 @@ def dishonest_polynomial_no_boundary_conditions(g: Poly, max_degree: Union[None,
 
     X = g.gens[0]
     # Set d = min(g.degree(), p - 1)
-    if max_degree:
+    if max_degree is not None:
         d = min(max_degree, p - 1)
     else:
         d = min(g.degree(), p - 1)
@@ -1252,13 +1263,14 @@ def dishonest_polynomial_no_boundary_conditions(g: Poly, max_degree: Union[None,
 
     if d > 1:
         # h(x) = x*(x-1)*∏(x - i) for i=2,...,d-1
-        # If random_choice=True, pick d-2 distinct random elements from {2,...,p-1}.
+        # If random_roots=True, pick d-2 distinct random elements from {2,...,p-1}.
         if d == 2:
             h = Poly(X * (X - F.one), X, domain=F)
+            alphas = [F.zero, F.one]
         else:
-            # We need d-2 elements. If random_choice is False, we use 2,...,d-1.
-            # If random_choice is True, we pick them at random from {2,...,p-1}.
-            if random_choice:
+            # We need d-2 elements. If random_roots is False, we use 2,...,d-1.
+            # If random_roots is True, we pick them at random from {2,...,p-1}.
+            if random_roots:
                 candidates = list(range(2, p))
                 random.shuffle(candidates)
                 chosen_ints = candidates[:(d - 2)]  # d-2 elements
@@ -1271,6 +1283,8 @@ def dishonest_polynomial_no_boundary_conditions(g: Poly, max_degree: Union[None,
                 h *= Poly(X - alpha, X, domain=F)
 
         return g + h, alphas
+    
+    return None, None
 
 
 """

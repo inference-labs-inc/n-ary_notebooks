@@ -1,7 +1,7 @@
 from itertools import product
 from typing import Optional, Set, Dict, Callable, Tuple, Any, List
 import ast
-from sympy import Symbol, Add, Mul, Pow, preorder_traversal, srepr, Expr, symbols, Poly
+from sympy import Symbol, Add, Mul, Pow, Expr, symbols, Poly
 from sympy import isprime
 from sympy.polys.domains import GF
 from sympy.polys.domains.finitefield import FiniteField
@@ -9,12 +9,19 @@ import re
 import pydot
 from networkx.drawing.nx_pydot import from_pydot
 from collections import defaultdict
-from .utils import print_header, RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
-import copy
+from .utils import print_header, RED, GREEN, YELLOW, PINK, RESET
 import random
 from .multilinear_extensions import multilinear_extension
 from graphviz import Digraph
 import networkx as nx
+import os
+import sys
+import tempfile
+import subprocess
+from pathlib import Path
+import shutil
+from .terminal_output import TerminalOutput, out
+
 
 
 class ArithmeticCircuit:
@@ -53,15 +60,22 @@ class ArithmeticCircuit:
         print_tilde_W(): Prints the multilinear extensions of the gate-value functions (W).
         print_wiring_predicate_mles(): Prints the multilinear extensions of the addition and multiplication wiring predicates.
         print_verification_propagation_equation(mle: Optional[bool]): Prints the layer-wise gate value propagation equation or its multilinear extension version.
+        view(which: str = "bitstring", *, format: str = "svg", ...):
+            Renders the circuit as a Graphviz diagram (bitstring-labeled or machine-labeled)
+            and opens it in the system's default viewer. Intended for use in terminal-based
+            workflows where inline display (e.g., Jupyter) is unavailable.
 
     Usage:
         - Input a list of mathematical expressions to construct the circuit.
-        - Visualize the circuit using the Graphviz representation.
+        - Visualize the circuit using Graphviz:
+              * In Jupyter: display(circuit.graphviz_circuit_bitstring)
+              * In a terminal: circuit.view("bitstring")
         - Compute and analyze gate values and wiring predicates.
         - Verify Thaler's identity or the propagation equation.
     """
 
-    def __init__(self, *expr_strings: Optional[str], prime: int):
+    def __init__(self, *expr_strings: Optional[str], prime: int, out: TerminalOutput = out):
+        self.out = out
         # 0. Underlying field, which must be a prime field
         if not isprime(prime):
             raise ValueError(f"We can only work with prime fields. Enter a prime number for the order of the field.\n")
@@ -76,12 +90,12 @@ class ArithmeticCircuit:
         # 3. Check if the graph is a DAG
         self.is_dag = nx.is_directed_acyclic_graph(self.networkx_circuit_machine_ID)
         if not self.is_dag:
-            print(f"\nWARNING: The purported circuit is not a directed acyclic graph. It therefore does not model a well-defined computation.\n")
+            out.print(f"\nWARNING: The purported circuit is not a directed acyclic graph. It therefore does not model a well-defined computation.\n")
 
         # 4. Check if all non-source nodes have fan-in of 2
         self.fan_in_two = check_fan_in_two(self.networkx_circuit_machine_ID)
         if not self.fan_in_two:
-            print(f"\nWARNING: The circuit contains gates with a fan-in not equal to 2. The mathematical results and proofs may not be valid for this configuration.\n")
+            out.print(f"\nWARNING: The circuit contains gates with a fan-in not equal to 2. The mathematical results and proofs may not be valid for this configuration.\n")
 
         # 5. Size of the graph (number of nodes)
         self.size = self.networkx_circuit_machine_ID.number_of_nodes()
@@ -109,13 +123,96 @@ class ArithmeticCircuit:
         try:
             self.W_dict, self.add_dict, self.mult_dict = construct_W_and_wiring_dicts(self.networkx_circuit_machine_ID, self.node_dict, self.layers,self.field.mod)
         except Exception as e:
-            print(f"Unable to construct gate values or wiring predicates: {e}")
+            out.print(f"Unable to construct gate values or wiring predicates: {e}")
         # Now create the actual functions and their multilinear extensions
         try:
             self.W, self.tilde_W = generate_layer_functions_and_extensions(self.W_dict, self.field,multilinear_extension)
             self.add, self.tilde_add, self.mult, self.tilde_mult = generate_add_mult_functions_and_extensions(self.add_dict, self.mult_dict, self.field, multilinear_extension)
         except Exception as e:
-            print(f"Unable to construct multilinear extensions of gate values or wiring predicates: {e}.")
+            out.print(f"Unable to construct multilinear extensions of gate values or wiring predicates: {e}.")
+
+    def view(
+        self,
+        which: str = "bitstring",
+        *,
+        format: str = "svg",
+        filename: Optional[str] = None,
+        directory: Optional[os.PathLike] = None,
+        open_file: bool = True,
+        cleanup: bool = False,
+    ) -> Path:
+        """
+        Render the circuit graph to disk and (optionally) open it in the OS default viewer.
+
+        Args:
+            which: "bitstring" (default) or "machine".
+                - "bitstring" uses self.graphviz_circuit_bitstring
+                - "machine" uses self.graphviz_circuit
+            format: "svg" (default), "png", "pdf", etc. Must be supported by graphviz.
+            filename: base filename without extension. If None, an auto name is used.
+            directory: output directory. If None, uses a temp directory.
+            open_file: if True, open the rendered file in the default viewer.
+            cleanup: if True, delete intermediate files created by graphviz (keeps the final).
+
+        Returns:
+            Path to the rendered file.
+        """
+        if shutil.which("dot") is None:
+            raise RuntimeError(
+            "Graphviz system executable 'dot' not found on PATH. "
+            "Install Graphviz (system package) and ensure 'dot' is available."
+            )
+        # Pick which graphviz object to render
+        if which.lower() in {"bitstring", "bits", "bit"}:
+            dot = self.graphviz_circuit_bitstring
+            default_stem = "arithmetic_circuit_bitstring"
+        elif which.lower() in {"machine", "raw", "original"}:
+            dot = self.graphviz_circuit
+            default_stem = "arithmetic_circuit"
+        else:
+            raise ValueError("which must be 'bitstring' or 'machine'")
+
+        # Configure output location
+        out_dir = Path(directory) if directory is not None else Path(tempfile.gettempdir())
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = filename or default_stem
+        # graphviz wants a path WITHOUT extension; it appends ".{format}"
+        out_path_no_ext = out_dir / stem
+
+        # Make sure the Digraph knows the intended output format
+        dot.format = format
+
+        # Render (graphviz will create out_path_no_ext + ".{format}")
+        rendered_path_str = dot.render(
+            filename=str(out_path_no_ext),
+            cleanup=cleanup,
+            quiet=True,
+        )
+        rendered_path = Path(rendered_path_str)
+
+        # Open in default viewer
+        if open_file:
+            self._open_path(rendered_path)
+
+        return rendered_path
+
+    @staticmethod
+    def _open_path(path: Path) -> None:
+        """
+        Open a file path in the OS default application.
+        """
+        try:
+            if sys.platform.startswith("win"):
+                os.startfile(str(path))  # type: ignore[attr-defined]
+            elif sys.platform == "darwin":
+                subprocess.run(["open", str(path)], check=False)
+            else:
+                subprocess.run(["xdg-open", str(path)], check=False)
+        except Exception as e:
+            out.print(f"Could not open file automatically: {e}")
+            out.print(f"Rendered file is at: {path}")
+
     def print_topological_order(self) -> None:
         """
         Prints the topological ordering of the nodes in the circuit.
@@ -123,8 +220,8 @@ class ArithmeticCircuit:
         if not self.is_dag:
             raise ValueError(f"{RED}\nThe provided graph is not a directed acyclic graph (DAG).{RESET}\n")
 
-        print_header(f"{PINK}Topological ordering{RESET}\n", level=2)
-        print(f" {YELLOW}->{RESET} ".join(self.topological_ordering))
+        print_header(f"{PINK}Topological ordering{RESET}\n", level=2, out=out)
+        out.print(f" {YELLOW}->{RESET} ".join(self.topological_ordering))
 
     def print_gate_values(self) -> None:
         """
@@ -145,35 +242,35 @@ class ArithmeticCircuit:
         print_multilinear_extensions(self.W_dict, self.tilde_W)
 
     def print_wiring_predicate_mles(self):
-        print_header("Multlinear extensions of wiring predicates: ADD\n", level=2)
+        print_header("Multlinear extensions of wiring predicates: ADD\n", level=2, out=out)
 
         tilde_add = self.tilde_add
         tilde_mult = self.tilde_mult
         W_dict = self.W_dict
 
         for i in reversed(sorted(tilde_add.keys())):
-            print(f"Layer {i}\n".upper())
+            out.print(f"Layer {i}\n".upper())
             v = len(next(iter(W_dict[i].keys())))
             w = len(next(iter(W_dict[i + 1].keys())))
             formatted_input = ','.join(
                 [f"z_{j}" for j in range(v)] + [f"x_{j}" for j in range(w)] + [f"y_{j}" for j in range(w)])
             LHS = f"add\u0303_{i}({formatted_input})"
             RHS = replace_symbols_in_polynomial(tilde_add[i], v, w).as_expr()
-            print(f"{LHS} = {RHS}")
-            print("")
+            out.print(f"{LHS} = {RHS}")
+            out.print("")
 
-        print_header("Multlinear extensions of wiring predicates: MULT\n", level=2)
+        print_header("Multlinear extensions of wiring predicates: MULT\n", level=2, out=out)
 
         for i in reversed(sorted(tilde_mult.keys())):
-            print(f"Layer {i}\n".upper())
+            out.print(f"Layer {i}\n".upper())
             v = len(next(iter(W_dict[i].keys())))
             w = len(next(iter(W_dict[i + 1].keys())))
             formatted_input = ','.join(
                 [f"z_{j}" for j in range(v)] + [f"x_{j}" for j in range(w)] + [f"y_{j}" for j in range(w)])
             LHS = f"mult\u0303_{i}({formatted_input})"
             RHS = replace_symbols_in_polynomial(tilde_mult[i], v, w).as_expr()
-            print(f"{LHS} = {RHS}")
-            print("")
+            out.print(f"{LHS} = {RHS}")
+            out.print("")
 
     def print_verification_propagation_equation(
         self,
@@ -193,17 +290,17 @@ class ArithmeticCircuit:
 
         if mle:
             W, W_dict, add, mult, F = self.tilde_W, self.W_dict, self.tilde_add, self.tilde_mult, self.field
-            print_header(f"Verification of Thaler's identity\n", level=2)
+            print_header(f"Verification of Thaler's identity\n", level=2, out=out)
         else:
             W, W_dict, add, mult, F = self.W, self.W_dict, self.add, self.mult, self.field
-            print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2)
+            print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2, out=out)
 
         # Field size p (GF(p))
         p = int(self.field.mod)
 
         # Iterate over layers in descending order
         for i in sorted(add.keys(), reverse=True):
-            print(f"Layer {i}\n".upper())
+            out.print(f"Layer {i}\n".upper())
 
             # Bit-lengths of gate labels in layers i and i+1
             v = len(next(iter(W_dict[i].keys())))
@@ -234,7 +331,7 @@ class ArithmeticCircuit:
                     use_sampling = False
 
             if sampling_reason:
-                print(sampling_reason)
+                out.print(sampling_reason)
 
             # Helper: sample a random z in the correct domain without building product(...)
             def _random_z():
@@ -305,91 +402,15 @@ class ArithmeticCircuit:
                             f"{{0,1}}^{w} × {{0,1}}^{w}"
                         )
 
-                    print(f"{formatted_LHS} = {LHS}, {formatted_RHS} = {RHS} {correct}")
+                    out.print(f"{formatted_LHS} = {LHS}, {formatted_RHS} = {RHS} {correct}")
                     printed += 1
 
             if num_to_check > display_limit:
-                print(f"\n(Displayed {display_limit} of {num_to_check} checked equations.)")
+                out.print(f"\n(Displayed {display_limit} of {num_to_check} checked equations.)")
 
-            print("")
+            out.print("")
 
-    # def print_verification_propagation_equation(self, mle: Optional[bool] = None,
-    #                                             random_selection: Optional[int] = None):
-    #     if mle is None:
-    #         mle = False
-    #     if mle:
-    #         W, W_dict, add, mult, F = self.tilde_W, self.W_dict, self.tilde_add, self.tilde_mult, self.field
-    #         print_header(f"Verification of Thaler's identity\n", level=2)
-    #     else:
-    #         W, W_dict, add, mult, F = self.W, self.W_dict, self.add, self.mult, self.field
-    #         print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2)
-
-    #     for i in sorted(add.keys(), reverse=True):  # Iterate over layers in descending order
-    #         print(f"Layer {i}\n".upper())
-    #         v = len(next(iter(W_dict[i].keys())))
-    #         w = len(next(iter(W_dict[i + 1].keys())))
-
-    #         if mle:
-    #             z_range = list(product(range(self.field.mod), repeat=v))
-    #         else:
-    #             z_range = list(product([0, 1], repeat=v))
-
-    #         if random_selection:
-    #             if random_selection < len(z_range):
-    #                 print(f"(Random selection of {random_selection} z-values.)\n")
-    #             z_range = random.sample(z_range, min(random_selection, len(z_range)))
-
-    #         for z in z_range:
-    #             if mle:
-    #                 LHS = F(W[i].eval(z))
-    #             else:
-    #                 LHS = F(W[i](z))
-    #             LHS = int(LHS)
-
-    #             xy_range = list(product(product([0, 1], repeat=w), repeat=2))
-
-    #             if mle:
-    #                 RHS = sum(
-    #                     [add[i].eval(z + x + y) * (W[i + 1].eval(x) + W[i + 1].eval(y)) +
-    #                      mult[i].eval(z + x + y) * W[i + 1].eval(x) * W[i + 1].eval(y)
-    #                      for x, y in xy_range]
-    #                 )
-    #             else:
-    #                 RHS = sum(
-    #                     [add[i](z + x + y) * (W[i + 1](x) + W[i + 1](y)) +
-    #                      mult[i](z + x + y) * W[i + 1](x) * W[i + 1](y)
-    #                      for x, y in xy_range]
-    #                 )
-    #             RHS = F(RHS)
-    #             RHS = int(RHS)
-
-    #             if LHS == RHS:
-    #                 correct = f"{GREEN}\u2713{RESET}"  # tick
-    #             else:
-    #                 correct = f"{RED}\u2717{RESET}"  # cross
-
-    #             formatted_tuple = ','.join([f"{z_j}" for z_j in z])
-    #             z_display = f"({formatted_tuple})"  # always show parentheses; for v=0 this becomes "()"
-
-    #             if mle:
-    #                 formatted_LHS = f"W\u0303_{i}{z_display}"
-    #                 formatted_RHS = (
-    #                     f"sum {{ add\u0303_{i}({z_display},x,y) [ W\u0303_{i + 1}(x) + W\u0303_{i + 1}(y) ] + "
-    #                     f"mult\u0303_{i}({z_display},x,y) [ W\u0303_{i + 1}(x) W\u0303_{i + 1}(y)] }} over (x,y) in "
-    #                     f"{{0,1}}^{w} × {{0,1}}^{w}"
-    #                 )
-    #             else:
-    #                 formatted_LHS = f"W_{i}{z_display}"
-    #                 formatted_RHS = (
-    #                     f"sum {{ add_{i}({z_display},x,y) [ W_{i + 1}(x) + W_{i + 1}(y) ] + "
-    #                     f"mult_{i}({z_display},x,y) [ W_{i + 1}(x) W_{i + 1}(y)] }} over (x,y) in "
-    #                     f"{{0,1}}^{w} × {{0,1}}^{w}"
-    #                 )
-
-    #             print(f"{formatted_LHS} = {LHS}, {formatted_RHS} = {RHS} {correct}")
-    #         print("")
-
-"""
+    """
 START: CONSTRUCT ARITHMETIC CIRCUIT FROM STRING EXPRESSION
 """
 def parse_expression(expr_str: str) -> Expr:
@@ -679,8 +700,8 @@ def print_topological_ordering(nx_graph: nx.DiGraph):
     topo_order = list(nx.topological_sort(nx_graph))
 
     # Print the ordering
-    print_header(f"{PINK}Topological ordering{RESET}\n", level=2)
-    print(f" {YELLOW}->{RESET} ".join(topo_order))
+    print_header(f"{PINK}Topological ordering{RESET}\n", level=2, out=out)
+    out.print(f" {YELLOW}->{RESET} ".join(topo_order))
 
 
 def partition_layers(nx_graph: nx.DiGraph) -> dict[int, set[str]]:
@@ -742,7 +763,7 @@ def check_layer_structure(nx_graph: nx.DiGraph, layers: dict[int, set[str]]) -> 
     for u in layers[0]:  # The output layer is layer 0
         for pred in nx_graph.predecessors(u):
             if pred not in layers[1]:
-                print(f"Warning! Circuit does not have desired structure: node {u} in layer 0 has an incoming edge from node {pred} which is not in layer 1.")
+                out.print(f"Warning! Circuit does not have desired structure: node {u} in layer 0 has an incoming edge from node {pred} which is not in layer 1.")
                 return False
 
     # (2) Check that layers i (for 1 <= i < max_layer-1) have incoming edges only from layer i+1
@@ -750,14 +771,14 @@ def check_layer_structure(nx_graph: nx.DiGraph, layers: dict[int, set[str]]) -> 
         for u in layers[i]:  # For each node u in layer i
             for pred in nx_graph.predecessors(u):
                 if pred not in layers[i + 1]:
-                    print(
+                    out.print(
                         f"Warning! Circuit does not have desired structure: node {u} in layer {i} has an incoming edge from node {pred} which is not in layer {i + 1}.")
                     return False
 
     # (3) Check that the input layer (max_layer) has no incoming edges
     for u in layers[max_layer]:  # The input layer is layer max_layer
         if nx_graph.in_degree(u) > 0:
-            print(f"Warning! Circuit does not have desired structure: node {u} in input layer ({max_layer}) has incoming edges.")
+            out.print(f"Warning! Circuit does not have desired structure: node {u} in input layer ({max_layer}) has incoming edges.")
             return False
 
     # If all checks pass, return True
@@ -784,7 +805,7 @@ def check_unique_layer_assignment(nx_graph: nx.DiGraph, layers: dict[int, set[st
         for node in nodes:
             # If the node has already been seen, it appears in more than one layer
             if node in seen_nodes:
-                print(f"Warning! Circuit does not have desired structure: node {node} appears in multiple layers.")
+                out.print(f"Warning! Circuit does not have desired structure: node {node} appears in multiple layers.")
                 return False
             seen_nodes.add(node)
 
@@ -796,9 +817,9 @@ def check_unique_layer_assignment(nx_graph: nx.DiGraph, layers: dict[int, set[st
         missing_nodes = graph_nodes - all_nodes_in_layers
         extra_nodes = all_nodes_in_layers - graph_nodes
         if missing_nodes:
-            print(f"Warning! Circuit does not have desired structure: the following nodes are missing from the layers: {missing_nodes}")
+            out.print(f"Warning! Circuit does not have desired structure: the following nodes are missing from the layers: {missing_nodes}")
         if extra_nodes:
-            print(f"Warning! Circuit does not have desired structure: the following nodes are extra in the layers: {extra_nodes}")
+            out.print(f"Warning! Circuit does not have desired structure: the following nodes are extra in the layers: {extra_nodes}")
         return False
 
     # If all checks pass, return True
@@ -1063,17 +1084,17 @@ def construct_W_and_wiring_dicts(
     return W_dict, add_dict, mult_dict
 
 
-def print_W_dict(W_dict: Dict[int, Dict[tuple, int]]) -> None:
+def print_W_dict(W_dict: Dict[int, Dict[tuple, int]], *, out: TerminalOutput = out,) -> None:
     """
     Prints the W_dict in a structured format, layer by layer.
 
     Args:
         W_dict (Dict[int, Dict[tuple, int]]): The dictionary representing the layer-wise weights.
     """
-    print_header(f"Gate values\n", level=2)
+    print_header(f"Gate values\n", level=2, out=out)
     # Iterate through layers in sorted order
     for layer in sorted(W_dict.keys(), reverse=True):  # Start from the highest layer
-        print(f"Layer {layer}\n".upper())
+        out.print(f"Layer {layer}\n".upper())
 
         # Sort the tuples (keys of the inner dictionary) in lexicographical order
         sorted_keys = sorted(W_dict[layer].keys())
@@ -1081,15 +1102,15 @@ def print_W_dict(W_dict: Dict[int, Dict[tuple, int]]) -> None:
         # Print each weight in the layer
         for key in sorted_keys:
             formatted_key = ','.join(map(str, key))  # Convert tuple to comma-separated string
-            print(f"W_{layer}({formatted_key}) = {W_dict[layer][key]}")
+            out.print(f"W_{layer}({formatted_key}) = {W_dict[layer][key]}")
 
-        print("")  # Add spacing between layers
+        out.print("")  # Add spacing between layers
 
 # Helper function for print_add_mult_dicts below
 def flatten_inner_tuples(lst):
     return [tuple(item if not isinstance(item, tuple) else item for sub in t for item in (sub if isinstance(sub, tuple) else [sub])) for t in lst]
 
-def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], mult_dict: Dict[int, Dict[tuple, int]]) -> None:
+def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], mult_dict: Dict[int, Dict[tuple, int]], *, out: TerminalOutput = out,) -> None:
     """
     Prints the add_dict and mult_dict in a structured format, layer by layer.
     Only entries where the value is 1 are printed.
@@ -1120,22 +1141,22 @@ def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], mult_dict: Dict[
     mult_dict_sorted = filter_and_sort_dict(mult_dict)
 
     # Print add_dict
-    print_header("Addition Wiring Predicates (nonzero values)\n", level=2)
+    print_header("Addition Wiring Predicates (nonzero values)\n", level=2, out=out)
     for layer, keys in add_dict_sorted.items():
-        print(f"Layer {layer}\n".upper())
+        out.print(f"Layer {layer}\n".upper())
         for key in keys:
             formatted_key = ','.join(map(str, key))
-            print(f"add_{layer}({formatted_key}) = 1")
-        print("")  # Add spacing between layers
+            out.print(f"add_{layer}({formatted_key}) = 1")
+        out.print("")  # Add spacing between layers
 
     # Print mult_dict
-    print_header("Multiplication Wiring Predicates (nonzero values)\n", level=2)
+    print_header("Multiplication Wiring Predicates (nonzero values)\n", level=2, out=out)
     for layer, keys in mult_dict_sorted.items():
-        print(f"Layer {layer}\n".upper())
+        out.print(f"Layer {layer}\n".upper())
         for key in keys:
             formatted_key = ','.join(map(str, key))
-            print(f"mult_{layer}({formatted_key}) = 1")
-        print("")  # Add spacing between layers
+            out.print(f"mult_{layer}({formatted_key}) = 1")
+        out.print("")  # Add spacing between layers
 
 def generate_layer_functions_and_extensions(
     W_dict: Dict[int, Dict[Tuple[int, ...], int]],
@@ -1279,7 +1300,7 @@ def generate_add_mult_functions_and_extensions(
 
 def print_multilinear_extensions(
     W_dict: Dict[int, Dict[Tuple[int], int]],
-    tilde_W: Dict[int, Callable]
+    tilde_W: Dict[int, Callable], *, out: TerminalOutput = out,
 ) -> None:
     """
     Prints the multilinear extensions for each layer in a structured format.
@@ -1288,15 +1309,15 @@ def print_multilinear_extensions(
         W_dict (Dict[int, Dict[Tuple[int], int]]): The dictionary of layer-wise weights.
         tilde_W (Dict[int, Callable]): The dictionary of multilinear extensions for each layer.
     """
-    print_header(f"Multlinear extensions of gate-value functions\n", level=2)
+    print_header(f"Multlinear extensions of gate-value functions\n", level=2, out=out)
     for i in sorted(W_dict.keys(), reverse=True):  # Iterate over layers in descending order
-        print(f"Layer {i}\n".upper())
+        out.print(f"Layer {i}\n".upper())
         # Determine the length of the bitstring keys for the current layer
         v = len(next(iter(W_dict[i].keys())))
         # Generate symbolic variable names x_0, x_1, ..., x_{v-1}
         formatted_tuple = ', '.join([f"x_{j}" for j in range(v)])
         # Print the formatted output
-        print(f"W\u0303_{i}({formatted_tuple}) = {tilde_W[i].as_expr()}\n")
+        out.print(f"W\u0303_{i}({formatted_tuple}) = {tilde_W[i].as_expr()}\n")
 
 
 def replace_symbols_in_polynomial(poly: Poly, v: int, w: int) -> Poly:

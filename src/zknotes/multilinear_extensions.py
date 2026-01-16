@@ -1,18 +1,17 @@
-from typing import Optional, Union, List, Dict, Tuple, Set, Callable, Sequence, Any
-from .utils import count_calls, print_header, display_aligned
-from .utils import RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
+from typing import Optional, Union, List, Dict, Tuple, Callable, Sequence, Any
+from .utils import RED, GREEN, YELLOW, BLUE, RESET
 from .sum_check import stringify
 import numpy as np
 from itertools import product
-import random
-import re
-from sympy import symbols, Poly, isprime, sympify, degree
+from sympy import symbols, Poly, isprime
 from sympy.polys.domains import GF
 from sympy.polys.domains import Domain
 from sympy.polys.domains.modularinteger import ModularInteger
 from sympy.polys.domains.finitefield import FiniteField
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Symbol
+
+from .terminal_output import TerminalOutput, out
 
 """
 CONSTRUCTING MLE
@@ -52,13 +51,14 @@ def tilde_beta_poly(
 
     # Default values for X and Y if not provided
     if X is None:
-        X = symbols(f"x_:v")
+        X = symbols(f"x_:{v}")
     if Y is None:
-        Y = symbols(f"y_:v")
+        Y = symbols(f"y_:{v}")
 
     # Generate the arrays of polynomials for x and y variables
-    x: np.ndarray[Poly] = np.array([Poly(X[j], X, domain=field) for j in range(v)])
-    y: np.ndarray[Poly] = np.array([Poly(Y[j], Y, domain=field) for j in range(v)])
+    XY = X + Y
+    x: np.ndarray[Poly] = np.array([Poly(X[j], XY, domain=field) for j in range(v)])
+    y: np.ndarray[Poly] = np.array([Poly(Y[j], XY, domain=field) for j in range(v)])
 
     # Compute the jth term for each pair (x_j, y_j) using (1 - x_j)(1 - y_j) + x_j * y_j
     jth_term: np.ndarray[Poly] = (1 - x) * (1 - y) + x * y
@@ -137,8 +137,8 @@ def lagrange_basis(v: int,
     basis = []
     for j in range(v):
         # Basis polynomials are (1 - x_j) for point 0 and x_j for point 1
-        L_0 = Poly(1 - X[j], X[j], domain=field)
-        L_1 = Poly(X[j], X[j], domain=field)
+        L_0 = Poly(1 - X[j], X, domain=field)
+        L_1 = Poly(X[j], X, domain=field)
         basis.append((L_0, L_1))
     return basis
 
@@ -168,7 +168,7 @@ def multilinear_extension_using_lagrange_basis(
         f_val = field(func(binary_vector))
 
         # Compute the product of Lagrange basis polynomials at `point`
-        term = f_val
+        term = Poly(f_val, X, domain=field)
         for i in range(v):
             term *= basis[i][binary_vector[i]]
 
@@ -185,7 +185,12 @@ END ALTERNATE APPROACH TO CONSTRUCTING MLE
 CREATE EXAMPLES
 """
 
-def multilinear_extension_example(show_result: bool = True, compare: bool = False):
+def multilinear_extension_example(
+    show_result: bool = True,
+    compare: bool = False,
+    *,
+    out: TerminalOutput = out,
+) -> Optional[Tuple[List[Poly], List[np.ndarray]]]:
     """
     Interactive demo: build MLEs of functions f : {0,1}^v -> GF(p).
 
@@ -207,17 +212,17 @@ def multilinear_extension_example(show_result: bool = True, compare: bool = Fals
         if loop_counter in {0, 1}:
             p = 11
             v = 2
-            print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
+            out.print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
         else:
-            print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
-            p = int(input("Enter a prime number p (we will work over GF(p)): ").strip())
+            out.print(f"\n{BLUE}EXAMPLE {loop_counter + 1}.{RESET}")
+            p = int(out.input("Enter a prime number p (we will work over GF(p)): ").strip())
             if not isprime(p):
-                print(f"{RED}Invalid input: p must be prime.{RESET}")
+                out.print(f"{RED}Invalid input: p must be prime.{RESET}")
                 continue
 
-            v = int(input("Enter a positive integer v (we extend f : {0,1}^v -> GF(p)): ").strip())
+            v = int(out.input("Enter a positive integer v (we extend f : {0,1}^v -> GF(p)): ").strip())
             if v <= 0:
-                print(f"{RED}Invalid input: v must be a positive integer.{RESET}")
+                out.print(f"{RED}Invalid input: v must be a positive integer.{RESET}")
                 continue
 
         pee.append(p)
@@ -226,7 +231,7 @@ def multilinear_extension_example(show_result: bool = True, compare: bool = Fals
         field = GF(p, symmetric=False)
 
         # nicer formatting than **v
-        print(f"\nWe extend a function f : {{0,1}}^{v} -> {field} to a function f̃ : {field}^{v} -> {field}.\n")
+        out.print(f"\nWe extend a function f : {{0,1}}^{v} -> {field} to a function f̃ : {field}^{v} -> {field}.\n")
 
         # ----------------------------
         # Collect function values on {0,1}^v
@@ -234,25 +239,25 @@ def multilinear_extension_example(show_result: bool = True, compare: bool = Fals
         func_values: Dict[Tuple[int, ...], Any] = {}
 
         if loop_counter == 0:
-            func_values[(0, 0)] = field(1); print("The function value for input (0, 0) is: 1")
-            func_values[(0, 1)] = field(2); print("The function value for input (0, 1) is: 2")
-            func_values[(1, 0)] = field(3); print("The function value for input (1, 0) is: 3")
-            func_values[(1, 1)] = field(4); print("The function value for input (1, 1) is: 4")
+            func_values[(0, 0)] = field(1); out.print("The function value for input (0, 0) is: 1")
+            func_values[(0, 1)] = field(2); out.print("The function value for input (0, 1) is: 2")
+            func_values[(1, 0)] = field(3); out.print("The function value for input (1, 0) is: 3")
+            func_values[(1, 1)] = field(4); out.print("The function value for input (1, 1) is: 4")
 
         elif loop_counter == 1:
             # Slightly different second default so the compare demo is interesting
-            func_values[(0, 0)] = field(1); print("The function value for input (0, 0) is: 1")
-            func_values[(0, 1)] = field(2); print("The function value for input (0, 1) is: 2")
-            func_values[(1, 0)] = field(3); print("The function value for input (1, 0) is: 3")
-            func_values[(1, 1)] = field(3); print("The function value for input (1, 1) is: 3")
+            func_values[(0, 0)] = field(1); out.print("The function value for input (0, 0) is: 1")
+            func_values[(0, 1)] = field(2); out.print("The function value for input (0, 1) is: 2")
+            func_values[(1, 0)] = field(3); out.print("The function value for input (1, 0) is: 3")
+            func_values[(1, 1)] = field(3); out.print("The function value for input (1, 1) is: 3")
 
         else:
             for bitstring in product([0, 1], repeat=v):
-                user_input = input(f"Enter the function value for input {bitstring}: ").strip()
+                user_input = out.input(f"Enter the function value for input {bitstring}: ").strip()
                 try:
                     user_value = int(user_input)
                 except ValueError:
-                    print(f"{RED}Invalid input: function values must be integers.{RESET}")
+                    out.print(f"{RED}Invalid input: function values must be integers.{RESET}")
                     break
                 func_values[bitstring] = field(user_value)
             else:
@@ -276,11 +281,11 @@ def multilinear_extension_example(show_result: bool = True, compare: bool = Fals
 
         if show_result:
             X = stringify(symbols(f"x_:{v}"))
-            print(f"\nThe multilinear extension of this function is:\n\n{YELLOW}f̃({X}) = {extended_func.as_expr()}{RESET}")
+            out.print(f"\nThe multilinear extension of this function is:\n\n{YELLOW}f̃({X}) = {extended_func.as_expr()}{RESET}")
 
         if show_result and v <= 2 and p < 50:
-            print(f"\nIn the following array, entry (i,j) is f̃(i,j):\n")
-            print(eval_array)
+            out.print(f"\nIn the following array, entry (i,j) is f̃(i,j):\n")
+            out.print(eval_array)
 
         # ----------------------------
         # Compare consecutive examples if requested and compatible
@@ -290,40 +295,40 @@ def multilinear_extension_example(show_result: bool = True, compare: bool = Fals
                 p_cmp = pee[-1]
                 v_cmp = vee[-1]
 
-                print(f"\nThe multilinear extension of the first function "
+                out.print(f"\nThe multilinear extension of the first function "
                       f"({BLUE}EXAMPLE {loop_counter}{RESET}) is: {YELLOW}{mle[-2].as_expr()}{RESET}.")
-                print(f"\nThe multilinear extension of the second function "
+                out.print(f"\nThe multilinear extension of the second function "
                       f"({BLUE}EXAMPLE {loop_counter + 1}{RESET}) is: {YELLOW}{mle[-1].as_expr()}{RESET}.")
-                print(f"\nThe multilinear extensions can agree on at most {v_cmp * p_cmp**(v_cmp - 1)} "
+                out.print(f"\nThe multilinear extensions can agree on at most {v_cmp * p_cmp**(v_cmp - 1)} "
                       f"out of {p_cmp**v_cmp} points.")
 
                 if v_cmp <= 2 and p_cmp < 50:
                     agree = (grid[-2] == grid[-1]).sum()
-                    print(f"\nIndeed, they agree on {GREEN}{agree} points{RESET}, as shown below.\n")
+                    out.print(f"\nIndeed, they agree on {GREEN}{agree} points{RESET}, as shown below.\n")
 
                     tuple_array = np.empty(grid[-2].shape, dtype=object)
                     for index, _ in np.ndenumerate(grid[-2]):
                         tuple_array[index] = (int(grid[-2][index]), int(grid[-1][index]))
 
                     for i in range(tuple_array.shape[0]):
+                        row_parts = []
                         for j in range(tuple_array.shape[1]):
                             a, b = tuple_array[i, j]
                             if a == b:
-                                print(f"{GREEN}{(a, b)}{RESET}", end=" ")
+                                row_parts.append(f"{GREEN}{(a, b)}{RESET}")
                             else:
-                                print(f"{RED}{(a, b)}{RESET}", end=" ")
-                        print()
+                                row_parts.append(f"{RED}{(a, b)}{RESET}")
+                        out.print(" ".join(row_parts))
             else:
-                print(f"\n{YELLOW}Compare skipped: last two examples used different (p, v).{RESET}")
+                out.print(f"\n{YELLOW}Compare skipped: last two examples used different (p, v).{RESET}")
 
         # ----------------------------
         # Prompt to continue (ALWAYS reachable)
         # ----------------------------
-        again = input("\nAnother example? (y/n) ").strip().lower()
+        again = out.input("\nAnother example? (y/n) ").strip().lower()
         loop_counter += 1
         if again != "y":
-            break
-
+            break       
     return mle, grid
 
 def evaluation_array(polynomial: Poly) -> np.ndarray:

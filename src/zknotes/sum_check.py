@@ -87,7 +87,7 @@ def choose_polynomial(
         prompt = custom_message
     else:
         prompt = (
-            f"Enter your polynomial over {field} "
+            f"\nEnter your polynomial over {field} "
             f"(e.g. 2*X_0**2 + X_0*X_1*X_2 + X_1*X_4**3 + X_1 + X_3):"
         )
 
@@ -353,7 +353,9 @@ def sum_check_example(out=out) -> None:
         if again == 'n':
             carry_on = False
 
-def sum_check(out=out, *, use_commitment: bool = False) -> Optional[bool]:
+def sum_check(out=out, 
+              *, 
+              use_commitment: bool = False,) -> Optional[bool]:
     """
     Sets up and initiates the sum-check protocol using user input and interactive choices.
 
@@ -407,12 +409,54 @@ def sum_check(out=out, *, use_commitment: bool = False) -> Optional[bool]:
     announce_dishonesty: bool = True
     dishonest: List[bool] = [False]   # default; will be overwritten
 
+    dishonest_opening: bool = False
+    announce_opening_dishonesty: bool = True
+    
+    if use_commitment:
+        if not user_is_prover:
+            opening_selection = out.input(
+                f"\nChoose a, b, or c: About the {YELLOW}opened polynomial g{RESET}, the prover will "
+                f"(a) {RED}lie{RESET}. "
+                f"(b) {RED}lie{RESET} with probability 1/2. "
+                f"(c) {GREEN}not lie{RESET}."
+            ).strip().lower()
+
+            if opening_selection in ("l", "h"):
+                announce_opening_dishonesty = False
+
+            if opening_selection in ("a", "l"):
+                dishonest_opening = True
+            elif opening_selection == "b":
+                dishonest_opening = bool(random.randint(0, 1))
+            else:  # c or h
+                dishonest_opening = False
+
+        else:
+            # If you're "playing prover" in front of an audience, you might still want
+            # to decide secretly whether you will cheat at opening time.
+            opening_selection = out.input(
+                f"\nChoose a, b, or c: At the end, the prover will "
+                f"(a) reveal a {RED}different polynomial{RESET} than the committed one. "
+                f"(b) do so with probability 1/2. "
+                f"(c) reveal the {GREEN}committed polynomial{RESET}."
+            ).strip().lower()
+
+            if opening_selection in ("l", "h"):
+                announce_opening_dishonesty = False
+
+            if opening_selection in ("a", "l"):
+                dishonest_opening = True
+            elif opening_selection == "b":
+                dishonest_opening = bool(random.randint(0, 1))
+            else:
+                dishonest_opening = False
+
     if not user_is_prover:
         dishonesty_selection = out.input(
-            "Choose a, b, or c: Prover "
-            "(a) will lie. "
-            "(b) will lie with probability 1/2. "
-            "(c) will not lie."
+            f"\nChoose a, b, or c: About the {YELLOW}value of H{RESET} (the sum of g over the Boolean hypercube), the prover will "
+            f"(a) {RED}lie{RESET} about the value of H. "
+            f"(b) {RED}lie{RESET} with probability 1/2. "
+            f"(c) {GREEN}not lie{RESET}."
             ).strip().lower()
 
         if dishonesty_selection in ("l", "h"):
@@ -450,6 +494,8 @@ def sum_check(out=out, *, use_commitment: bool = False) -> Optional[bool]:
                                             use_commitment=use_commitment,
                                             commit_hash=commit_hash,
                                             announce_dishonesty=announce_dishonesty,
+                                            dishonest_opening=dishonest_opening,
+                                            announce_opening_dishonesty=announce_opening_dishonesty,
                                             out=out,)
         user_H_star = int(user_H_star)
         H_star = F.convert(user_H_star)
@@ -478,6 +524,8 @@ def sum_check(out=out, *, use_commitment: bool = False) -> Optional[bool]:
         use_commitment=use_commitment,
         commit_hash=commit_hash,
         announce_dishonesty=announce_dishonesty,
+        dishonest_opening=dishonest_opening,
+        announce_opening_dishonesty=announce_opening_dishonesty,
         out=out,
     )
     if hasattr(out, "flush"):
@@ -498,6 +546,8 @@ def sum_check_recursion(
     use_commitment: bool = False,
     commit_hash: Optional[str] = None,
     announce_dishonesty: bool = True,
+    dishonest_opening: bool = False, 
+    announce_opening_dishonesty: bool = True,
     *,
     out: TerminalOutput = out,
 ) -> bool:
@@ -541,18 +591,22 @@ def sum_check_recursion(
     # Once sum_check_recursion has been called v + 1 times, we're ready for the final verification
     if sum_check_recursion.call_count == len(g_init.gens):
         if show_steps:
-            sum_check_steps(g_init=g_init,
-                            g_0_star=g,
-                            H_star=H_star,
-                            r=r,
-                            dishonest=dishonest,
-                            user_is_prover=user_is_prover,
-                            final_check=True,
-                            use_commitment=use_commitment,
-                            commit_hash=commit_hash,
-                            announce_dishonesty=announce_dishonesty,
-                            out=out,)
+            ok = sum_check_steps(g_init=g_init,
+                                 g_0_star=g,
+                                 H_star=H_star,
+                                 r=r,
+                                 dishonest=dishonest,
+                                 user_is_prover=user_is_prover,
+                                 final_check=True,
+                                 use_commitment=use_commitment,
+                                 commit_hash=commit_hash,
+                                 announce_dishonesty=announce_dishonesty,
+                                 dishonest_opening=dishonest_opening,
+                                 announce_opening_dishonesty=announce_opening_dishonesty,
+                                 out=out,)
             out.flush()
+            if ok is False:
+                return False
         # Check if the final evaluated polynomial matches the original claim
         return H_star == F(g_init.eval({g_init.gens[k]: r_ for k, r_ in enumerate(r)}))
 
@@ -576,37 +630,46 @@ def sum_check_recursion(
     else:
         g_0_star = g_0
 
-    if show_steps:
-        if user_is_prover and dishonest[-1]:
-            g_0_star = sum_check_steps(g_init=g_init,
-                                       g_0 = g_0,
-                                       g_0_star=g_0_star_suggestion,
-                                       roots_of_g_0_star_minus_g_0=roots_of_g_0_star_minus_g_0,
-                                       H_star=H_star,
-                                       r=r,
-                                       dishonest=dishonest,
-                                       user_is_verifier=user_is_verifier,
-                                       user_is_prover=user_is_prover,
-                                       skip=skip_show_step, 
-                                       use_commitment=use_commitment,
-                                       commit_hash=commit_hash,
-                                       announce_dishonesty=announce_dishonesty,
-                                       out=out,)
-            if g_0_star is None:
-                return False
-        else:
-            sum_check_steps(g_init=g_init,
-                            g_0_star=g_0_star,
-                            H_star=H_star,
-                            r=r,
-                            dishonest=dishonest,
-                            user_is_verifier=user_is_verifier,
-                            user_is_prover=user_is_prover,
-                            skip=skip_show_step,
-                            use_commitment=use_commitment,
-                            commit_hash=commit_hash,
-                            announce_dishonesty=announce_dishonesty,
-                            out=out,)
+    if show_steps and user_is_prover and dishonest[-1]:
+        res = sum_check_steps(g_init=g_init,
+                                    g_0 = g_0,
+                                    g_0_star=g_0_star_suggestion,
+                                    roots_of_g_0_star_minus_g_0=roots_of_g_0_star_minus_g_0,
+                                    H_star=H_star,
+                                    r=r,
+                                    dishonest=dishonest,
+                                    user_is_verifier=user_is_verifier,
+                                    user_is_prover=user_is_prover,
+                                    skip=skip_show_step, 
+                                    use_commitment=use_commitment,
+                                    commit_hash=commit_hash,
+                                    announce_dishonesty=announce_dishonesty,
+                                    dishonest_opening=dishonest_opening,
+                                    announce_opening_dishonesty=announce_opening_dishonesty,
+                                    out=out,)
+        if res is False:
+            return False
+        assert isinstance(res, Poly)
+        g_0_star = res
+
+    elif show_steps:
+        ok = sum_check_steps(g_init=g_init,
+                        g_0_star=g_0_star,
+                        H_star=H_star,
+                        r=r,
+                        dishonest=dishonest,
+                        user_is_verifier=user_is_verifier,
+                        user_is_prover=user_is_prover,
+                        skip=skip_show_step,
+                        use_commitment=use_commitment,
+                        commit_hash=commit_hash,
+                        announce_dishonesty=announce_dishonesty,
+                        dishonest_opening=dishonest_opening,
+                        announce_opening_dishonesty=announce_opening_dishonesty,
+                        out=out,)
+        if ok is False:
+            return False
+
     # Verify degree consistency
     j = sum_check_recursion.call_count
     d = g_0.degree(g_init.gens[j])
@@ -634,6 +697,8 @@ def sum_check_recursion(
                                    use_commitment=use_commitment,
                                    commit_hash=commit_hash,
                                    announce_dishonesty=announce_dishonesty,
+                                   dishonest_opening=dishonest_opening,
+                                   announce_opening_dishonesty=announce_opening_dishonesty,
                                    out=out,)
     else:
         return False  # Reject if sum-check claim fails
@@ -654,9 +719,11 @@ def sum_check_steps(
     use_commitment: bool = False,
     commit_hash: Optional[str] = None,
     announce_dishonesty: bool = True,
+    dishonest_opening: bool = False, 
+    announce_opening_dishonesty: bool = True,
     *,
     out: TerminalOutput = out,
-) -> Union[None, Tuple[str, bool], Poly]:
+) -> Union[None, bool, Tuple[str, bool], Poly]:
     """
     Displays and guides through the detailed reasoning steps of each round in the sum-check protocol.
 
@@ -697,7 +764,9 @@ def sum_check_steps(
         LHS = f"g*_{j - 1}({to_string(r[j - 1])})"
         RHS = f"g({r_})"
         subs = {g_init.gens[k]: r[k] for k in range(len(r))}
-        g_at_r = int(F(g_init.eval(subs)))
+
+        # Always the committed polynomial's value (conceptually what PCS opening proves)
+        g_comm_at_r = int(F(g_init.eval(subs)))
 
         out.print(f"\nIf all of P's claims are true, then\n\n{LHS} = {RHS}.")
         out.print(f"\nV computes\n\n{LHS} = {H_star}.")
@@ -709,30 +778,45 @@ def sum_check_steps(
                 f"(and typically hiding) polynomial commitment scheme and later proves that "
                 f"g(r) equals the claimed value using a succinct opening proof.⬛{RESET}"
                 )
+            
+            g_open = g_init
+            if dishonest_opening:
+                g_open = g_init + F(1)   # same vars/field, changes constant term
 
-            out.print(f"\nRevealed polynomial:\n\ng({X_}) = {g_init.as_expr()}.")
+            # Optional: if you want to hide that prover chose to lie until the end:
+            if announce_opening_dishonesty and dishonest_opening:
+                out.print(f"\n{RED}In this run, P will attempt to open with a different polynomial.{RESET}")
+
+            if dishonest_opening:
+                out.print(f"\nRevealed polynomial:\n\n{RED}g({X_}) = {g_open.as_expr()}{RESET}.")
+            else:
+                out.print(f"\nRevealed polynomial:\n\n{GREEN}g({X_}) = {g_open.as_expr()}{RESET}.")
 
             out.print("\nV recomputes the hash of the revealed polynomial and checks it matches the original commitment.")
 
-            recomputed = poly_commitment_sha256(g_init)
+            recomputed = poly_commitment_sha256(g_open)
             ok = (recomputed == commit_hash)
 
             out.print(f"\nCommitment check: {GREEN}PASS{RESET}" if ok else f"\nCommitment check: {RED}FAIL{RESET}")
             out.print(f"\nOriginal hash:   {commit_hash}")
-            out.print(f"Recomputed hash: {recomputed}")
-
+            if ok:
+                out.print(f"Recomputed hash: {GREEN}{recomputed}{RESET}")             
             if not ok:
+                out.print(f"Recomputed hash: {RED}{recomputed}{RESET}")
                 out.print(f"\nV {RED}REJECTS{RESET}: the revealed polynomial does not match the original commitment.")
-                return
-
-            out.print(f"\nFor the purposes of this demo (see caveat above): since g is revealed, V can evaluate it directly:\n\n{RHS} = {g_at_r}.")
+                return False
+            
+            # Demo: since g is revealed, V can evaluate the opened polynomial:
+            g_open_at_r = int(F(g_open.eval(subs)))
+            out.print(f"\nFor the purposes of this demo (see caveat above): since g is revealed, V can evaluate it directly:\n\n{RHS} = {g_open_at_r}.")
 
         else:
             out.print(
-                f"\nFinally, V queries an oracle for g at r to obtain\n\n{RHS} = {g_at_r}."
+                f"\nFinally, V queries an oracle for g at r to obtain\n\n{RHS} = {g_comm_at_r}."
             )
 
-        if F.convert(H_star) == F.convert(g_at_r):
+        check_val = g_open_at_r if (use_commitment and commit_hash is not None) else g_comm_at_r
+        if F.convert(H_star) == F.convert(check_val):
             out.print(f"\nP passes the final verification, and V {GREEN}ACCEPTS{RESET} P's initial claim that H = H*.")
             H = F(sum(g_init.eval({X[k]: b_k for k, b_k in enumerate(bb)})
                       for bb in product([F(0), F(1)], repeat=v)))
@@ -746,8 +830,8 @@ def sum_check_steps(
         else:
             out.print(f"\nP fails the final verification, and V {RED}REJECTS{RESET} P's initial claim that H = H*.")
             out.print(
-                f"\n(Interpretation: P can often keep the transcript locally consistent round-by-round, "
-                f"but the final random evaluation ties the transcript to the true g and typically catches a lie.)"
+                f"\n{YELLOW}Interpretation: P can often keep the transcript locally consistent round-by-round, "
+                f"but the final random evaluation ties the transcript to the true g and typically catches a lie.{RESET}"
             )
         return
 
@@ -791,7 +875,7 @@ def sum_check_steps(
             out.print(f"\nP claims that H = H*, where H* = {int(F(H_star))}.")
             if announce_dishonesty and dishonest and dishonest[0]:
                 out.print(
-                    "\n(For this run, P's initial claim H* is intentionally false, and P will try to get away with it.)")
+                    f"\n{RED}In this run, P's initial claim H* is intentionally false, and P will try to get away with it.{RESET}")
 
     # ----------------------------
     # If we are past initialization, report the last sampled challenge r_{j-1}
@@ -908,7 +992,7 @@ def sum_check_steps(
     else:
         out.print(f"\nV finds that deg(g*_{j}) = {g_0_star.degree()} > deg_{j}(g) = {d}.")
         out.print(f"\nV {RED}REJECTS{RESET} (degree bound violated). The protocol terminates.")
-        return g_0_star          
+        return False         
 
     # Consistency check for the sum relation
     if LHS == "H*":
@@ -927,6 +1011,7 @@ def sum_check_steps(
 
     if F(H_star) != F(g_0_star.eval(F(0)) + g_0_star.eval(F(1))):
         out.print(f"\nV {RED}REJECTS{RESET} upon exposing an inconsistency in P's claims. The protocol terminates.")
+        return False
     else:
         out.print("\nV sees that P's claims so far are consistent.")
 

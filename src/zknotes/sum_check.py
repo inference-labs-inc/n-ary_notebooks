@@ -15,8 +15,9 @@ from sympy.polys.domains.finitefield import FiniteField
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Symbol
 import random
+import hashlib
 
-from .terminal_output import out
+from .terminal_output import TerminalOutput, out
 
 def choose_polynomial(
     field: Optional[Domain] = None,
@@ -352,7 +353,7 @@ def sum_check_example(out=out) -> None:
         if again == 'n':
             carry_on = False
 
-def sum_check(out=out) -> Optional[bool]:
+def sum_check(out=out, *, use_commitment: bool = False) -> Optional[bool]:
     """
     Sets up and initiates the sum-check protocol using user input and interactive choices.
 
@@ -379,7 +380,7 @@ def sum_check(out=out) -> Optional[bool]:
         out.flush()
     
     # Get the polynomial from the user
-    multivariate_init = choose_polynomial(prompt_for_k=False)
+    multivariate_init = choose_polynomial(prompt_for_k=False, out=out)
     if multivariate_init is None:
         return None  # Exit if the polynomial is not provided
 
@@ -388,10 +389,13 @@ def sum_check(out=out) -> Optional[bool]:
         out.print("Sorry, we can only handle prime fields at present.")
         return None  # Exit if the field is non-prime
 
+    commit_hash = poly_commitment_sha256(multivariate_init) if use_commitment else None
+    
     # Prompt user for interactive mode
     interactive_input = out.input("\nDo you want this to be interactive? (y/n): ")
     user_input = interactive_input.lower() == 'y'
     # Initialize user_is_verifier and user_is_prover booleans as False (will update according to user responses below)
+    
     user_is_verifier: bool = False
     user_is_prover: bool = False
     if user_input:
@@ -399,16 +403,26 @@ def sum_check(out=out) -> Optional[bool]:
         user_selection_prover = out.input("Do you want to act as prover? (y/n): ")
         user_is_verifier = user_selection_verifier.lower() == 'y'
         user_is_prover = user_selection_prover.lower() == 'y'
+    
+    announce_dishonesty: bool = True
+    dishonest: List[bool] = [False]   # default; will be overwritten
+
     if not user_is_prover:
-        dishonesty_selection = out.input("Choose a, b, or c: Prover "
-                                     "(a) will lie. "
-                                     "(b) will lie with probability 1/2. "
-                                     "(c) will not lie.")
-        if dishonesty_selection.lower() == 'a':
+        dishonesty_selection = out.input(
+            "Choose a, b, or c: Prover "
+            "(a) will lie. "
+            "(b) will lie with probability 1/2. "
+            "(c) will not lie."
+            ).strip().lower()
+
+        if dishonesty_selection in ("l", "h"):
+            announce_dishonesty = False  # secret modes: don't reveal anything to verifier/audience
+
+        if dishonesty_selection in ("a", "l"):          # l = lie (secret)
             dishonest: List[bool] = [True]
-        elif dishonesty_selection.lower() == 'b':
+        elif dishonesty_selection == "b":
             dishonest: List[bool] = [bool(random.randint(0, 1))]
-        else:
+        else:                                           # c or h (secret honest)
             dishonest: List[bool] = [False]
 
     # Extract polynomial variables, field, and number of variables
@@ -433,6 +447,9 @@ def sum_check(out=out) -> Optional[bool]:
                                             H_star=H,
                                             user_is_verifier=user_is_verifier,
                                             user_is_prover=user_is_prover,
+                                            use_commitment=use_commitment,
+                                            commit_hash=commit_hash,
+                                            announce_dishonesty=announce_dishonesty,
                                             out=out,)
         user_H_star = int(user_H_star)
         H_star = F.convert(user_H_star)
@@ -458,6 +475,10 @@ def sum_check(out=out) -> Optional[bool]:
         user_is_prover=user_is_prover,
         show_steps=True,
         skip_show_step=skip,
+        use_commitment=use_commitment,
+        commit_hash=commit_hash,
+        announce_dishonesty=announce_dishonesty,
+        out=out,
     )
     if hasattr(out, "flush"):
         out.flush()
@@ -474,6 +495,11 @@ def sum_check_recursion(
     user_is_prover: bool = False,
     show_steps: bool = True,
     skip_show_step: bool = False,
+    use_commitment: bool = False,
+    commit_hash: Optional[str] = None,
+    announce_dishonesty: bool = True,
+    *,
+    out: TerminalOutput = out,
 ) -> bool:
     """
     Recursively executes the rounds of the sum-check protocol, verifying each polynomial claim.
@@ -522,6 +548,9 @@ def sum_check_recursion(
                             dishonest=dishonest,
                             user_is_prover=user_is_prover,
                             final_check=True,
+                            use_commitment=use_commitment,
+                            commit_hash=commit_hash,
+                            announce_dishonesty=announce_dishonesty,
                             out=out,)
             out.flush()
         # Check if the final evaluated polynomial matches the original claim
@@ -559,6 +588,9 @@ def sum_check_recursion(
                                        user_is_verifier=user_is_verifier,
                                        user_is_prover=user_is_prover,
                                        skip=skip_show_step, 
+                                       use_commitment=use_commitment,
+                                       commit_hash=commit_hash,
+                                       announce_dishonesty=announce_dishonesty,
                                        out=out,)
         else:
             sum_check_steps(g_init=g_init,
@@ -569,6 +601,9 @@ def sum_check_recursion(
                             user_is_verifier=user_is_verifier,
                             user_is_prover=user_is_prover,
                             skip=skip_show_step,
+                            use_commitment=use_commitment,
+                            commit_hash=commit_hash,
+                            announce_dishonesty=announce_dishonesty,
                             out=out,)
     # Verify degree consistency
     j = sum_check_recursion.call_count
@@ -593,7 +628,11 @@ def sum_check_recursion(
                                    r=r,
                                    dishonest=dishonest,
                                    user_is_verifier=user_is_verifier,
-                                   user_is_prover=user_is_prover,)
+                                   user_is_prover=user_is_prover,
+                                   use_commitment=use_commitment,
+                                   commit_hash=commit_hash,
+                                   announce_dishonesty=announce_dishonesty,
+                                   out=out,)
     else:
         return False  # Reject if sum-check claim fails
 
@@ -610,6 +649,9 @@ def sum_check_steps(
     user_is_verifier: bool = False,
     user_is_prover: bool = False,
     skip: bool = False,
+    use_commitment: bool = False,
+    commit_hash: Optional[str] = None,
+    announce_dishonesty: bool = True,
     *,
     out: TerminalOutput = out,
 ) -> Union[None, Tuple[str, bool], Poly]:
@@ -649,19 +691,49 @@ def sum_check_steps(
             out.print(f"\n{RED}=== END INVISIBLE TO VERIFIER ==={RESET}")
 
         r_ = stringify(r)
+
         LHS = f"g*_{j - 1}({to_string(r[j - 1])})"
         RHS = f"g({r_})"
-        from_oracle = int(F(g_init.eval({g_init.gens[k]: r_ for k, r_ in enumerate(r)})))
+        subs = {g_init.gens[k]: r[k] for k in range(len(r))}
+        g_at_r = int(F(g_init.eval(subs)))
 
         out.print(f"\nIf all of P's claims are true, then\n\n{LHS} = {RHS}.")
         out.print(f"\nV computes\n\n{LHS} = {H_star}.")
 
-        out.print(
-            f"\nFinally, V queries an oracle for g (or verifies an opening of a binding commitment to g) "
-            f"to obtain\n\n{RHS} = {from_oracle}."
-        )
+        if use_commitment and commit_hash is not None:
+            out.print("\nP now reveals g (this is the 'opening' step in our toy commitment demo).")
+            out.print(
+                "\nCaveat (real protocols): in practice, P does *not* reveal g. Instead, P commits to g using a "
+                "binding (and typically hiding) polynomial commitment scheme / PCS, and later provides an *opening proof* "
+                "that the committed polynomial evaluates to a claimed value at the single point r."
+            )
+            out.print(
+                "\nV verifies this opening proof efficiently (typically polylogarithmic in the size/degree of g), "
+                "without reconstructing g or doing any heavy computation comparable to summing over {0,1}^v."
+            )
+            out.print(f"\nRevealed polynomial:\n\ng({X_}) = {g_init.as_expr()}.")
 
-        if F.convert(H_star) == F.convert(from_oracle):
+            out.print("\nV recomputes the hash of the revealed polynomial and checks it matches the original commitment.")
+
+            recomputed = poly_commitment_sha256(g_init)
+            ok = (recomputed == commit_hash)
+
+            out.print(f"\nCommitment check: {GREEN}PASS{RESET}" if ok else f"\nCommitment check: {RED}FAIL{RESET}")
+            out.print(f"\nOriginal hash:   {commit_hash}")
+            out.print(f"Recomputed hash: {recomputed}")
+
+            if not ok:
+                out.print(f"\nV {RED}REJECTS{RESET}: the revealed polynomial does not match the original commitment.")
+                return
+
+            out.print(f"\nOnly in this demo, since g is revealed, V can evaluate it directly to obtain\n\n{RHS} = {g_at_r}.")
+
+        else:
+            out.print(
+                f"\nFinally, V queries an oracle for g at r to obtain\n\n{RHS} = {g_at_r}."
+            )
+
+        if F.convert(H_star) == F.convert(g_at_r):
             out.print(f"\nP passes the final verification, and V {GREEN}ACCEPTS{RESET} P's initial claim that H = H*.")
             H = F(sum(g_init.eval({X[k]: b_k for k, b_k in enumerate(bb)})
                       for bb in product([F(0), F(1)], repeat=v)))
@@ -685,17 +757,29 @@ def sum_check_steps(
     # ----------------------------
     if not r and not skip:
         print_header("Initialization", out=out)
-        out.print(f"\nLet\n\ng({X_}) = {g_init.as_expr()}.")
 
-        # Clarify demo vs protocol model
-        out.print(
-            f"\n(In this demo we display g for the reader. In the protocol, V does not receive g explicitly; "
-            f"V only has oracle/committed evaluation access to g.)"
-        )
+        degs = [int(g_init.degree(gen)) for gen in g_init.gens]
+        show_g_now = not (use_commitment and commit_hash is not None and user_is_verifier and not user_is_prover)
 
-        out.print(f"\nV does not know g, but does know that it is a polynomial over {F} in {v} indeterminates.")
-        out.print(f"\nV also knows an upper bound for the degree of each indeterminate in g.")
+        if show_g_now:
+            out.print(f"\nLet\n\ng({X_}) = {g_init.as_expr()}.")
+            out.print(f"\n- For soundness, V relies on degree bounds per variable: {degs}.")
+            if use_commitment and commit_hash is not None:
+                out.print(f"\n(Commitment hash: {commit_hash})")
+
+            out.print(
+                f"\n- We display g for the reader. In the protocol, V does not receive g explicitly; "
+                f"V only has oracle/committed evaluation access to g."
+            )
+
+        else:
+            out.print(f"\nV receives a commitment to g (not g itself).")
+            out.print(f"\nDegree bounds per variable: {degs}")
+            out.print(f"\nCommitment hash: {commit_hash}")
+            out.print(f"\nV proceeds knowing only the field, arity, degree bounds, and a binding commitment to g.")
+
         out.print(f"\nLet\n\nH := sum g({b_}) over ({b_}) in {{0,1}}^{v}.")
+
 
         if user_is_prover:
             user_H_star = out.input(
@@ -706,7 +790,7 @@ def sum_check_steps(
         else:
             # Fix "P claims that and H..."
             out.print(f"\nP claims that H = H*, where H* = {int(F(H_star))}.")
-            if dishonest and dishonest[0]:
+            if announce_dishonesty and dishonest and dishonest[0]:
                 out.print(
                     "\n(For this run, P's initial claim H* is intentionally false, and P will try to get away with it.)")
 
@@ -1289,4 +1373,42 @@ def dishonest_polynomial_no_boundary_conditions(g: Poly, max_degree: Union[None,
 
 """
 END: FUNCTIONS RELATED TO ROLE OF PROVER, WHETHER DISHONEST OR HONEST
+"""
+
+"""
+START: TOY HASH COMMITMENT FUNCTIONS
+"""
+
+def poly_commitment_sha256(g: Poly) -> str:
+    """
+    Toy commitment: SHA-256 hash of a canonical serialization of a SymPy Poly.
+
+    Binding here is only "demo binding":
+    - if someone later changes g, the hash will (almost surely) change.
+    - not hiding (hash is not a commitment scheme).
+    """
+    F = g.domain
+    p = int(getattr(F, "mod", 0) or 0)
+    gens = tuple(str(x) for x in g.gens)
+
+    # Canonical term list: (monom tuple, coeff int) sorted lexicographically
+    # Poly.terms() gives [((e0,...,ev-1), coeff), ...]
+    terms: list[Tuple[Tuple[int, ...], int]] = []
+    for monom, coeff in g.terms():
+        try:
+            c = int(coeff)
+        except Exception:
+            c = int(F.convert(coeff))
+        terms.append((tuple(int(e) for e in monom), c))
+
+    terms.sort()
+
+    # Degree bounds per variable (what V "knows")
+    degs = tuple(int(g.degree(gen)) for gen in g.gens)
+
+    payload = repr((p, gens, degs, terms)).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+"""
+END: TOY HASH COMMITMENT FUNCTIONS
 """

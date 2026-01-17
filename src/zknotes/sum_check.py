@@ -592,6 +592,8 @@ def sum_check_recursion(
                                        commit_hash=commit_hash,
                                        announce_dishonesty=announce_dishonesty,
                                        out=out,)
+            if g_0_star is None:
+                return False
         else:
             sum_check_steps(g_init=g_init,
                             g_0_star=g_0_star,
@@ -702,15 +704,12 @@ def sum_check_steps(
 
         if use_commitment and commit_hash is not None:
             out.print("\nP now reveals g (this is the 'opening' step in our toy commitment demo).")
-            out.print(
-                "\nCaveat (real protocols): in practice, P does *not* reveal g. Instead, P commits to g using a "
-                "binding (and typically hiding) polynomial commitment scheme / PCS, and later provides an *opening proof* "
-                "that the committed polynomial evaluates to a claimed value at the single point r."
-            )
-            out.print(
-                "\nV verifies this opening proof efficiently (typically polylogarithmic in the size/degree of g), "
-                "without reconstructing g or doing any heavy computation comparable to summing over {0,1}^v."
-            )
+            out.print(f"\n{YELLOW}⚠  CAVEAT (real protocols): "
+                f"In practice, P does *not* reveal g. Instead, P commits to g using a binding "
+                f"(and typically hiding) polynomial commitment scheme and later proves that "
+                f"g(r) equals the claimed value using a succinct opening proof.⬛{RESET}"
+                )
+
             out.print(f"\nRevealed polynomial:\n\ng({X_}) = {g_init.as_expr()}.")
 
             out.print("\nV recomputes the hash of the revealed polynomial and checks it matches the original commitment.")
@@ -726,7 +725,7 @@ def sum_check_steps(
                 out.print(f"\nV {RED}REJECTS{RESET}: the revealed polynomial does not match the original commitment.")
                 return
 
-            out.print(f"\nOnly in this demo, since g is revealed, V can evaluate it directly to obtain\n\n{RHS} = {g_at_r}.")
+            out.print(f"\nFor the purposes of this demo (see caveat above): since g is revealed, V can evaluate it directly:\n\n{RHS} = {g_at_r}.")
 
         else:
             out.print(
@@ -763,13 +762,13 @@ def sum_check_steps(
 
         if show_g_now:
             out.print(f"\nLet\n\ng({X_}) = {g_init.as_expr()}.")
-            out.print(f"\n- For soundness, V relies on degree bounds per variable: {degs}.")
+            out.print(f"\nFor soundness, V relies on degree bounds per variable: {degs}.")
             if use_commitment and commit_hash is not None:
-                out.print(f"\n(Commitment hash: {commit_hash})")
+                out.print(f"\nCommitment hash: {commit_hash}")
 
             out.print(
-                f"\n- We display g for the reader. In the protocol, V does not receive g explicitly; "
-                f"V only has oracle/committed evaluation access to g."
+                f"\n{YELLOW}We display g for the reader. In the protocol, V does not receive g explicitly;{RESET} "
+                f"{YELLOW}V only has oracle/committed evaluation access to g.{RESET}"
             )
 
         else:
@@ -907,11 +906,9 @@ def sum_check_steps(
             f"\nV checks the degree bound: deg(g*_{j}) = {g_0_star.degree()} ≤ deg_{j}(g) = {d}."
         )
     else:
-        out.print(
-            f"\nV finds that deg(g*_{j}) = {g_0_star.degree()} > deg_{j}(g) = {d}."
-        )
-        out.print(f"\nV {RED}REJECTS{RESET}.")
-        # Keep going to print consistency check info? Your old code continued; we keep that behavior.
+        out.print(f"\nV finds that deg(g*_{j}) = {g_0_star.degree()} > deg_{j}(g) = {d}.")
+        out.print(f"\nV {RED}REJECTS{RESET} (degree bound violated). The protocol terminates.")
+        return g_0_star          
 
     # Consistency check for the sum relation
     if LHS == "H*":

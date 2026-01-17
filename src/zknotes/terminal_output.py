@@ -5,6 +5,7 @@ import shutil
 import sys
 import os
 from contextlib import contextmanager
+import getpass
 
 RESET = "\033[0m"
 
@@ -128,12 +129,16 @@ class TerminalOutput:
         if self._paging_enabled_now() and self._line_count >= self._available_lines():
             self._pause()
 
-    def input(self, prompt: str = "") -> str:
+    def input(self, prompt: str = "", *, hidden: bool = False) -> str:
         # Ensure prompt is visible and not stuck behind a pager prompt
         if self.reset_on_prompt:
             sys.stdout.write(RESET)
             sys.stdout.flush()
-        return input(prompt)
+
+        if hidden:
+            return getpass.getpass(prompt)
+        else:
+            return input(prompt)
 
     def new_section(self, min_lines: int = 1) -> None:
         """

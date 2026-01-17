@@ -24,6 +24,7 @@ def choose_polynomial(
     custom_message: Union[None, str] = None,
     variable_names: Union[None, list] = None,
     prompt_for_k: bool = True,
+    secret_mode_for_poly: bool = False,
     *,
     out: TerminalOutput = out,  
 ) -> Union[None, Poly]:
@@ -91,7 +92,7 @@ def choose_polynomial(
             f"(e.g. 2*X_0**2 + X_0*X_1*X_2 + X_1*X_4**3 + X_1 + X_3):"
         )
 
-    poly_str = out.input(prompt)
+    poly_str = out.input(prompt, hidden=secret_mode_for_poly)
 
     detected_variables = set(re.findall(r"X_\d+", poly_str))
 
@@ -355,7 +356,8 @@ def sum_check_example(out=out) -> None:
 
 def sum_check(out=out, 
               *, 
-              use_commitment: bool = False,) -> Optional[bool]:
+              use_commitment: bool = False,
+              secret_mode: Optional[bool] = None,) -> Optional[bool]:
     """
     Sets up and initiates the sum-check protocol using user input and interactive choices.
 
@@ -381,8 +383,29 @@ def sum_check(out=out,
     if hasattr(out, "flush"):
         out.flush()
     
+    # Prompt user for interactive mode
+    interactive_input = out.input("\nDo you want this to be interactive? (y/n): ")
+    user_input = interactive_input.strip().lower() == 'y'
+    if not user_input:
+        out.print("\nAlthough you've selected non-interative mode, responses to a few prompts are still required...")
+
+    # Initialize user_is_verifier and user_is_prover booleans as False (will update according to user responses below)
+    user_is_verifier: bool = False
+    user_is_prover: bool = False
+
+    if user_input:
+        user_selection_prover = out.input("Do you want to act as prover? (y/n): ")
+        user_selection_verifier = out.input("Do you want to act as verifier? (y/n): ")
+        user_is_prover = user_selection_prover.strip().lower() == 'y'
+        user_is_verifier = user_selection_verifier.strip().lower() == 'y'
+
+    if secret_mode is None:
+        secret_mode = (user_is_verifier and not user_is_prover)
+
     # Get the polynomial from the user
-    multivariate_init = choose_polynomial(prompt_for_k=False, out=out)
+    multivariate_init = choose_polynomial(prompt_for_k=False, 
+                                          secret_mode_for_poly=secret_mode, 
+                                          out=out)
     if multivariate_init is None:
         return None  # Exit if the polynomial is not provided
 
@@ -393,80 +416,48 @@ def sum_check(out=out,
 
     commit_hash = poly_commitment_sha256(multivariate_init) if use_commitment else None
     
-    # Prompt user for interactive mode
-    interactive_input = out.input("\nDo you want this to be interactive? (y/n): ")
-    user_input = interactive_input.lower() == 'y'
-    # Initialize user_is_verifier and user_is_prover booleans as False (will update according to user responses below)
-    
-    user_is_verifier: bool = False
-    user_is_prover: bool = False
-    if user_input:
-        user_selection_verifier = out.input("Do you want to act as verifier? (y/n): ")
-        user_selection_prover = out.input("Do you want to act as prover? (y/n): ")
-        user_is_verifier = user_selection_verifier.lower() == 'y'
-        user_is_prover = user_selection_prover.lower() == 'y'
-    
-    announce_dishonesty: bool = True
     dishonest: List[bool] = [False]   # default; will be overwritten
 
     dishonest_opening: bool = False
-    announce_opening_dishonesty: bool = True
     
     if use_commitment:
         if not user_is_prover:
             opening_selection = out.input(
-                f"\nChoose a, b, or c: About the {YELLOW}opened polynomial g{RESET}, the prover will "
-                f"(a) {RED}lie{RESET}. "
-                f"(b) {RED}lie{RESET} with probability 1/2. "
-                f"(c) {GREEN}not lie{RESET}."
+                f"\nChoose a, b, or c: About the opened polynomial g, the prover will "
+                f"(a) lie. "
+                f"(b) lie with probability 1/2. "
+                f"(c) not lie.",
+                hidden=secret_mode,
             ).strip().lower()
 
-            if opening_selection in ("l", "h"):
-                announce_opening_dishonesty = False
-
-            if opening_selection in ("a", "l"):
+            if opening_selection == "a":
                 dishonest_opening = True
             elif opening_selection == "b":
                 dishonest_opening = bool(random.randint(0, 1))
-            else:  # c or h
+            else:  # c or anything other than a or b
                 dishonest_opening = False
 
         else:
-            # If you're "playing prover" in front of an audience, you might still want
-            # to decide secretly whether you will cheat at opening time.
-            opening_selection = out.input(
-                f"\nChoose a, b, or c: At the end, the prover will "
-                f"(a) reveal a {RED}different polynomial{RESET} than the committed one. "
-                f"(b) do so with probability 1/2. "
-                f"(c) reveal the {GREEN}committed polynomial{RESET}."
-            ).strip().lower()
-
-            if opening_selection in ("l", "h"):
-                announce_opening_dishonesty = False
-
-            if opening_selection in ("a", "l"):
-                dishonest_opening = True
-            elif opening_selection == "b":
-                dishonest_opening = bool(random.randint(0, 1))
-            else:
-                dishonest_opening = False
+            # Prover will decide later at opening time.
+            dishonest_opening = False  # irrelevant for prover-driven opening
+            out.print(
+                "\nAt the end, the prover will choose what to open with."
+                )
 
     if not user_is_prover:
         dishonesty_selection = out.input(
-            f"\nChoose a, b, or c: About the {YELLOW}value of H{RESET} (the sum of g over the Boolean hypercube), the prover will "
-            f"(a) {RED}lie{RESET} about the value of H. "
-            f"(b) {RED}lie{RESET} with probability 1/2. "
-            f"(c) {GREEN}not lie{RESET}."
+            f"\nChoose a, b, or c: About the value of H (the sum of g over the Boolean hypercube), the prover will "
+            f"(a) lie about the value of H. "
+            f"(b) lie with probability 1/2. "
+            f"(c) not lie.",
+            hidden=secret_mode,
             ).strip().lower()
 
-        if dishonesty_selection in ("l", "h"):
-            announce_dishonesty = False  # secret modes: don't reveal anything to verifier/audience
-
-        if dishonesty_selection in ("a", "l"):          # l = lie (secret)
+        if dishonesty_selection == "a":
             dishonest: List[bool] = [True]
         elif dishonesty_selection == "b":
             dishonest: List[bool] = [bool(random.randint(0, 1))]
-        else:                                           # c or h (secret honest)
+        else: # c or anyhing other than a or b
             dishonest: List[bool] = [False]
 
     # Extract polynomial variables, field, and number of variables
@@ -493,9 +484,8 @@ def sum_check(out=out,
                                             user_is_prover=user_is_prover,
                                             use_commitment=use_commitment,
                                             commit_hash=commit_hash,
-                                            announce_dishonesty=announce_dishonesty,
                                             dishonest_opening=dishonest_opening,
-                                            announce_opening_dishonesty=announce_opening_dishonesty,
+                                            secret_mode=secret_mode,
                                             out=out,)
         user_H_star = int(user_H_star)
         H_star = F.convert(user_H_star)
@@ -523,11 +513,49 @@ def sum_check(out=out,
         skip_show_step=skip,
         use_commitment=use_commitment,
         commit_hash=commit_hash,
-        announce_dishonesty=announce_dishonesty,
         dishonest_opening=dishonest_opening,
-        announce_opening_dishonesty=announce_opening_dishonesty,
+        secret_mode=secret_mode,
         out=out,
     )
+    print_header("Ground truth", level=1, out=out)
+
+    # Truncated display of true g
+    X_ = stringify(multivariate_init.gens)
+    expr_str = str(multivariate_init.as_expr())
+    MAX = 800  # characters
+
+    if len(expr_str) > MAX:
+        expr_str = expr_str[:MAX] + " ... (truncated)"
+
+    out.print(f"\nTrue polynomial g:\n\ng({X_}) = {expr_str}")
+
+    # If commitments were used, clarify opening behavior
+    if use_commitment:
+        out.print("\nCommitment behavior:")
+        if dishonest_opening:
+            out.print(f"\nProver attempted a {RED}dishonest opening{RESET}.")
+        else:
+            out.print(f"\nProver opened the {GREEN}correct polynomial{RESET}.")
+
+    # True value of H
+    out.print(f"\nTrue value of H := ∑ g(b) over {{0,1}}^{v} is: {int(H)}")
+    out.print(f"\nClaimed H* = {int(F(H_star))}.")
+
+    if result:
+        out.print(f"\nOutcome: V {GREEN}ACCEPTED{RESET}.")
+        if F(H_star) == F(H):
+            out.print(f"\n{GREEN}This was a TRUE POSITIVE{RESET}: the claim H = H* was correct.")
+        else:
+            out.print(f"\n{RED}This was a FALSE POSITIVE{RESET}: V accepted a false claim (P got lucky).")
+    else:
+        out.print(f"\nOutcome: V {RED}REJECTED{RESET}.")
+        if F(H_star) == F(H):
+            out.print(f"{YELLOW}\nThis was a FALSE NEGATIVE{RESET}: rejection happened despite a true claim (should be rare unless opening failed / transcript inconsistent).")
+        else:
+            out.print(f"{GREEN}\nThis was a TRUE NEGATIVE{RESET}: V rejected a false claim.")
+
+    out.print("")
+
     if hasattr(out, "flush"):
         out.flush()
     return result
@@ -545,9 +573,8 @@ def sum_check_recursion(
     skip_show_step: bool = False,
     use_commitment: bool = False,
     commit_hash: Optional[str] = None,
-    announce_dishonesty: bool = True,
     dishonest_opening: bool = False, 
-    announce_opening_dishonesty: bool = True,
+    secret_mode: Optional[bool] = None,
     *,
     out: TerminalOutput = out,
 ) -> bool:
@@ -600,9 +627,8 @@ def sum_check_recursion(
                                  final_check=True,
                                  use_commitment=use_commitment,
                                  commit_hash=commit_hash,
-                                 announce_dishonesty=announce_dishonesty,
                                  dishonest_opening=dishonest_opening,
-                                 announce_opening_dishonesty=announce_opening_dishonesty,
+                                 secret_mode=secret_mode,
                                  out=out,)
             out.flush()
             if ok is False:
@@ -643,9 +669,8 @@ def sum_check_recursion(
                                     skip=skip_show_step, 
                                     use_commitment=use_commitment,
                                     commit_hash=commit_hash,
-                                    announce_dishonesty=announce_dishonesty,
                                     dishonest_opening=dishonest_opening,
-                                    announce_opening_dishonesty=announce_opening_dishonesty,
+                                    secret_mode=secret_mode,
                                     out=out,)
         if res is False:
             return False
@@ -663,9 +688,8 @@ def sum_check_recursion(
                         skip=skip_show_step,
                         use_commitment=use_commitment,
                         commit_hash=commit_hash,
-                        announce_dishonesty=announce_dishonesty,
                         dishonest_opening=dishonest_opening,
-                        announce_opening_dishonesty=announce_opening_dishonesty,
+                        secret_mode=secret_mode,
                         out=out,)
         if ok is False:
             return False
@@ -696,9 +720,8 @@ def sum_check_recursion(
                                    user_is_prover=user_is_prover,
                                    use_commitment=use_commitment,
                                    commit_hash=commit_hash,
-                                   announce_dishonesty=announce_dishonesty,
                                    dishonest_opening=dishonest_opening,
-                                   announce_opening_dishonesty=announce_opening_dishonesty,
+                                   secret_mode=secret_mode,
                                    out=out,)
     else:
         return False  # Reject if sum-check claim fails
@@ -718,9 +741,8 @@ def sum_check_steps(
     skip: bool = False,
     use_commitment: bool = False,
     commit_hash: Optional[str] = None,
-    announce_dishonesty: bool = True,
     dishonest_opening: bool = False, 
-    announce_opening_dishonesty: bool = True,
+    secret_mode: Optional[bool] = None,
     *,
     out: TerminalOutput = out,
 ) -> Union[None, bool, Tuple[str, bool], Poly]:
@@ -742,7 +764,7 @@ def sum_check_steps(
     r = r or []
 
     # ----------------------------
-    # Final verification (unchanged logic, improved phrasing)
+    # Final verification 
     # ----------------------------
     if final_check and r:
         print_header("\nFinal check", level=2, out=out)
@@ -771,20 +793,49 @@ def sum_check_steps(
         out.print(f"\nIf all of P's claims are true, then\n\n{LHS} = {RHS}.")
         out.print(f"\nV computes\n\n{LHS} = {H_star}.")
 
+        g_open_at_r: Optional[int] = None
+
         if use_commitment and commit_hash is not None:
             out.print("\nP now reveals g (this is the 'opening' step in our toy commitment demo).")
-            out.print(f"\n{YELLOW}⚠  CAVEAT (real protocols): "
+            out.print(f"\n{YELLOW}CAVEAT (real protocols): "
                 f"In practice, P does *not* reveal g. Instead, P commits to g using a binding "
                 f"(and typically hiding) polynomial commitment scheme and later proves that "
-                f"g(r) equals the claimed value using a succinct opening proof.⬛{RESET}"
+                f"g(r) equals the claimed value using a succinct opening proof.{RESET}"
                 )
             
             g_open = g_init
-            if dishonest_opening:
-                g_open = g_init + F(1)   # same vars/field, changes constant term
+
+            if user_is_prover:
+                # Let prover choose what to open with (honest or not).
+                choice = out.input(
+                    "\nPress ENTER to open honestly, or type 'x' to enter a different polynomial to open: ",
+                    hidden=secret_mode,
+                ).strip().lower()
+
+                if choice == "x":
+                    # Prover supplies an opening polynomial (can be dishonest).
+                    g_open = choose_polynomial(
+                        field=F,
+                        custom_message="\nEnter the polynomial you want to open with:",
+                        variable_names=[str(x) for x in g_init.gens],
+                        prompt_for_k=False,
+                        secret_mode_for_poly=bool(secret_mode),  # hide typing if you want
+                        out=out,
+                    )
+                    if g_open is None:
+                        out.print(f"\nV {RED}REJECTS{RESET}: no polynomial provided at opening.")
+                        return False
+            else:
+                # Non-prover mode: keep your scripted dishonesty.
+                if dishonest_opening:
+                    g_open = g_init + F(1)
+
+
+            # if dishonest_opening:
+            #     g_open = g_init + F(1)   # same vars/field, changes constant term
 
             # Optional: if you want to hide that prover chose to lie until the end:
-            if announce_opening_dishonesty and dishonest_opening:
+            if not secret_mode and dishonest_opening:
                 out.print(f"\n{RED}In this run, P will attempt to open with a different polynomial.{RESET}")
 
             if dishonest_opening:
@@ -831,7 +882,7 @@ def sum_check_steps(
             out.print(f"\nP fails the final verification, and V {RED}REJECTS{RESET} P's initial claim that H = H*.")
             out.print(
                 f"\n{YELLOW}Interpretation: P can often keep the transcript locally consistent round-by-round, "
-                f"but the final random evaluation ties the transcript to the true g and typically catches a lie.{RESET}"
+                f"but the final random evaluation ties the transcript to the true g and typically catches a lie.\n{RESET}"
             )
         return
 
@@ -842,38 +893,39 @@ def sum_check_steps(
         print_header("Initialization", out=out)
 
         degs = [int(g_init.degree(gen)) for gen in g_init.gens]
-        show_g_now = not (use_commitment and commit_hash is not None and user_is_verifier and not user_is_prover)
 
-        if show_g_now:
+        if secret_mode is False or secret_mode is None: 
             out.print(f"\nLet\n\ng({X_}) = {g_init.as_expr()}.")
-            out.print(f"\nFor soundness, V relies on degree bounds per variable: {degs}.")
-            if use_commitment and commit_hash is not None:
-                out.print(f"\nCommitment hash: {commit_hash}")
-
             out.print(
-                f"\n{YELLOW}We display g for the reader. In the protocol, V does not receive g explicitly;{RESET} "
-                f"{YELLOW}V only has oracle/committed evaluation access to g.{RESET}"
-            )
+            f"\n{YELLOW}We display g for the reader. In the protocol, V does not receive g explicitly;{RESET} "
+            f"{YELLOW}V only has oracle/committed evaluation access to g.{RESET}"
+            ) 
+            if use_commitment and commit_hash is not None:
+                out.print(f"\nCommitment hash (binding commitment to g): {commit_hash}")
+            out.print(f"\nFor soundness, V relies on degree bounds per variable (this is public information): {degs}.")
 
-        else:
+        if secret_mode and use_commitment and commit_hash is not None:
             out.print(f"\nV receives a commitment to g (not g itself).")
-            out.print(f"\nDegree bounds per variable: {degs}")
             out.print(f"\nCommitment hash: {commit_hash}")
-            out.print(f"\nV proceeds knowing only the field, arity, degree bounds, and a binding commitment to g.")
+            out.print(f"\nFor soundness, V relies on degree bounds per variable (this is public information): {degs}.")
+            out.print(f"\nV proceeds knowing only the field, arity, degree bounds, and a binding commitment to g.")     
+
+        elif secret_mode:
+            out.print(f"\nFor soundness, V relies on degree bounds per variable (this is public information): {degs}.")                
 
         out.print(f"\nLet\n\nH := sum g({b_}) over ({b_}) in {{0,1}}^{v}.")
 
-
         if user_is_prover:
-            user_H_star = out.input(
-                f"\nAs prover, enter your claim H* for the value of H (the true value is {int(H_star)}):"
-            )
+            if secret_mode is True:
+                user_H_star = out.input(f"\nAs prover, enter your claim H* for the value of H:", hidden=secret_mode)
+            else:
+                user_H_star = out.input(f"\nAs prover, enter your claim H* for the value of H (the true value is {int(H_star)}):")
             skip = True
             return user_H_star, skip
         else:
             # Fix "P claims that and H..."
             out.print(f"\nP claims that H = H*, where H* = {int(F(H_star))}.")
-            if announce_dishonesty and dishonest and dishonest[0]:
+            if dishonest and dishonest[0] and not(secret_mode is True):
                 out.print(
                     f"\n{RED}In this run, P's initial claim H* is intentionally false, and P will try to get away with it.{RESET}")
 
@@ -905,7 +957,7 @@ def sum_check_steps(
         out.print(f"\nLet\n\ng_{j}({str(X[j])}) := g({mixed_input})")
 
     # ----------------------------
-    # Prover-hidden advice block (kept, only tiny textual changes)
+    # Prover-hidden advice block 
     # ----------------------------
     if user_is_prover and dishonest[-1]:
         out.print(f"\n{RED}=== START INVISIBLE TO VERIFIER ==={RESET}")

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import inspect
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -9,68 +8,11 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import matplotlib.pyplot as plt
 import pandas as pd
 
-# ANSI escape codes for colors
-from ._ansi import get_colors
-
-_colors = get_colors()
-RED = _colors.RED
-GREEN = _colors.GREEN
-YELLOW = _colors.YELLOW
-PINK = _colors.PINK
-BLUE = _colors.BLUE
-PURPLE = _colors.PURPLE
-RESET = _colors.RESET
-
-# --- IPython / widgets are optional ---
-try:
-    from IPython import get_ipython
-    if get_ipython():
-        from IPython.display import HTML  # type: ignore
-        import ipywidgets as widgets  # type: ignore
-    else:
-        widgets = None
-
-        def HTML(*args, **kwargs):
-            print("HTML display is not available.")
-except ImportError:
-    widgets = None
-
-    def HTML(*args, **kwargs):
-        print("HTML display is not available.")
-
-
-def set_widgets(enable: bool = True, disable: bool = False) -> None:
-    global widgets
-    global HTML
-    if disable:
-        widgets = None
-
-        def HTML(*args, **kwargs):
-            print("HTML display is not available.")
-        return
-
-    if enable:
-        try:
-            from IPython import get_ipython
-            if get_ipython():
-                from IPython.display import HTML  # type: ignore
-                import ipywidgets as widgets  # type: ignore
-            else:
-                widgets = None
-
-                def HTML(*args, **kwargs):
-                    print("HTML display is not available.")
-        except ImportError:
-            widgets = None
-
-            def HTML(*args, **kwargs):
-                print("HTML display is not available.")
-
 
 def get_subdirectories(
     base_path: Path,
     depth: int = 0,
-    ignore: Optional[List[str]] = None
+    ignore: Optional[List[str]] = None,
 ) -> Dict[str, Path]:
     """
     Map subdirectory names to their Path objects, at a given depth.
@@ -105,7 +47,7 @@ def get_subdirectories(
 def extend_ignore_list(
     base_path: Path,
     regex_pattern: Optional[str] = None,
-    use_gitignore: bool = True
+    use_gitignore: bool = True,
 ) -> List[str]:
     """
     Return a list of names/patterns to ignore, optionally:
@@ -144,8 +86,14 @@ def get_directory_tree(
     ignore: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, Any], str]:
     """
-    Build a nested dict of directory structure and optionally print a colored tree.
+    Build a nested dict of directory structure and optionally print a tree.
+
+    NOTE: This function prints colored output using ANSI codes if available.
+    It imports colors lazily to avoid circular imports with terminal_output.
     """
+    # Lazy import to avoid circular imports
+    from .display import BLUE, YELLOW, RESET
+
     base_path = Path(base_path)
     if ignore is None:
         ignore = ["__pycache__", ".ipynb_checkpoints", "00-template.ipynb"]
@@ -204,44 +152,11 @@ def get_directory_tree(
     return path_structure, tree_output
 
 
-# --- Display helpers ---
-try:
-    from IPython.display import display as ipy_display  # type: ignore
-except ImportError:
-    ipy_display = None
-
-
-def display(*args):
-    if ipy_display is not None:
-        for arg in args:
-            if arg is not None:
-                ipy_display(arg)
-    else:
-        for arg in args:
-            if arg is not None:
-                print(arg)
-
-
-try:
-    from IPython.display import clear_output as ipy_clear_output  # type: ignore
-except ImportError:
-    ipy_clear_output = None
-
-
-def clear_output():
-    if ipy_clear_output is not None:
-        ipy_clear_output(wait=True)
-        return
-
-    # Fallback: clear terminal
-    if os.name == "nt":
-        os.system("cls")
-    else:
-        os.system("clear")
-
-
-def get_variable_name(var):
-    for name, value in inspect.currentframe().f_back.f_locals.items():
+def get_variable_name(var: object) -> Optional[str]:
+    frame = inspect.currentframe()
+    if frame is None or frame.f_back is None:
+        return None
+    for name, value in frame.f_back.f_locals.items():
         if value is var:
             return name
     return None
@@ -272,75 +187,6 @@ def save_df(
         plt.table(cellText=df.values, colLabels=df.columns, loc="center")
         plt.savefig(save_as)
     elif ext == ".txt":
-        with open(save_as, "w", encoding="utf-8") as f:
-            f.write(str(df.to_dict()))
+        save_as.write_text(str(df.to_dict()), encoding="utf-8")
     else:
         print(f"Unsupported file extension: {ext}. Please use csv, xlsx, html, json, png, or txt.")
-
-
-def print_header(title: str, level: int = 1, *, out: Optional[TerminalOutput] = None) -> None:
-    """
-    Print a section header, using TerminalOutput paging if provided.
-
-    level=1: big header with "=" bars above and below
-    level=2: smaller header (no bars)
-    """
-    printer = out.print if out is not None else print
-
-    # How many lines will this header occupy (conservative)?
-    # We print a leading blank line via "\n..." in the first print call.
-    if level == 1:
-        # blank line + 3 lines (bar/title/bar) = ~4 lines
-        min_lines = 5  # slightly conservative to avoid edge cases
-    else:
-        # blank line + 1 line = ~2 lines
-        min_lines = 2
-
-    if out is not None:
-        out.new_section(min_lines=min_lines)
-
-        # Print the header without paging mid-header
-        with out.atomic():
-            _print_header_block(printer, title, level)
-    else:
-        _print_header_block(printer, title, level)
-
-
-def _print_header_block(printer, title: str, level: int) -> None:
-    t = title.strip()
-    if level == 1:
-        line = "=" * len(t)
-        printer(f"\n{PINK}{line}{RESET}")
-        printer(f"{PINK}{t.upper()}{RESET}")
-        printer(f"{PINK}{line}{RESET}")
-    else:
-        printer(f"\n{PINK}{t.upper()}{RESET}")
-
-def display_aligned(*strings: str, out=None) -> None:
-    """
-    Print strings containing '=' aligned on the '=' sign.
-    If no string contains '=', prints all strings as-is.
-
-    If `out` is provided, uses `out.print(...)` instead of built-in print
-    (so paging behaves consistently).
-    """
-    printer = out.print if out is not None else print
-
-    parts = [s.split("=", 1) for s in strings if "=" in s]
-    if not parts:
-        for s in strings:
-            printer(s)
-        return
-
-    max_left_length = max(len(part[0].strip()) for part in parts)
-    for left, right in parts:
-        printer(f"{left.strip():>{max_left_length}} = {right.strip()}")
-
-
-def count_calls(func):
-    def wrapper(*args, **kwargs):
-        wrapper.call_count += 1
-        return func(*args, **kwargs)
-
-    wrapper.call_count = 0
-    return wrapper

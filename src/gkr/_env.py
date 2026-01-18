@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 
 from . import utils
 
@@ -18,32 +17,41 @@ def _find_project_root(start: Optional[Path] = None) -> Path:
     for p in [cur, *cur.parents]:
         if any((p / m).exists() for m in markers):
             return p
+
     # Fall back: package location (works after install)
+    # src/gkr/_env.py -> parents[2] should be project root in editable layout
     return Path(__file__).resolve().parents[2]
 
 
-def init(*, verbose: bool = False, root: Optional[str | Path] = None) -> Dict[str, Any]:
+def init(*, verbose: bool = False, root: Optional[Union[str, Path]] = None) -> Dict[str, Any]:
     """
     Initialize environment helpers for notebooks / demos.
 
-    Returns a dict with paths + utility functions, similar to your old `setup.py`,
-    but it doesn't rely on environment variables or sys.path hacks.
+    Returns a dict with paths + utility functions, without sys.path hacks.
     """
     project_root = Path(root).resolve() if root else _find_project_root()
-    scripts_path = project_root / "src" / "zknotes"
+    scripts_path = project_root / "src" / "gkr"
     notebooks_path = project_root / "notebooks"
 
     env: Dict[str, Any] = {
         "PROJECT_PATH": project_root,
         "SCRIPTS_PATH": scripts_path,
         "NOTEBOOKS_PATH": notebooks_path,
+
+        # helpers
         "print_header": utils.print_header,
         "get_directory_tree": utils.get_directory_tree,
         "get_subdirectories": utils.get_subdirectories,
         "display_aligned": utils.display_aligned,
+
         # colors
-        "RED": utils.RED, "GREEN": utils.GREEN, "YELLOW": utils.YELLOW,
-        "PINK": utils.PINK, "BLUE": utils.BLUE, "PURPLE": utils.PURPLE, "RESET": utils.RESET,
+        "RED": utils.RED,
+        "GREEN": utils.GREEN,
+        "YELLOW": utils.YELLOW,
+        "PINK": utils.PINK,
+        "BLUE": utils.BLUE,
+        "PURPLE": utils.PURPLE,
+        "RESET": utils.RESET,
     }
 
     # A "path" dict like you had before (first-level subdirs of project root)

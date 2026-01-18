@@ -1,8 +1,16 @@
 from __future__ import annotations
 
 from typing import Optional, Union, List, Dict, Tuple, Set, Any
-from .utils import count_calls, print_header, display_aligned
-from .utils import RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET
+
+from .utils import (
+    count_calls,
+    print_header,
+    display_aligned,
+    RED, GREEN, YELLOW, PINK, BLUE, PURPLE, RESET,
+    TerminalOutput,
+    out,
+)
+
 from itertools import product
 import random
 import re
@@ -14,10 +22,8 @@ from sympy.polys.domains.modularinteger import ModularInteger
 from sympy.polys.domains.finitefield import FiniteField
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Symbol
-import random
 import hashlib
 
-from .terminal_output import TerminalOutput, out
 
 def choose_polynomial(
     field: Optional[Domain] = None,
@@ -447,7 +453,7 @@ def sum_check(out=out,
     if not user_is_prover:
         dishonesty_selection = out.input(
             f"\nChoose a, b, or c: About the value of H (the sum of g over the Boolean hypercube), the prover will "
-            f"(a) lie about the value of H. "
+            f"(a) lie. "
             f"(b) lie with probability 1/2. "
             f"(c) not lie.",
             hidden=secret_mode,
@@ -538,8 +544,8 @@ def sum_check(out=out,
             out.print(f"\nProver opened the {GREEN}correct polynomial{RESET}.")
 
     # True value of H
-    out.print(f"\nTrue value of H := ∑ g(b) over {{0,1}}^{v} is: {int(H)}")
-    out.print(f"\nClaimed H* = {int(F(H_star))}.")
+    out.print(f"\nTrue value of H := sum g(b) over b in {{0,1}}^{v} is: {int(H)}")
+    out.print(f"\nProver claimed that this is equal to: H* = {int(F(H_star))}.")
 
     if result:
         out.print(f"\nOutcome: V {GREEN}ACCEPTED{RESET}.")

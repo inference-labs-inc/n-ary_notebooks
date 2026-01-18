@@ -1,6 +1,6 @@
 from typing import Optional, Union, List, Dict, Tuple, Callable, Sequence, Any
-from .utils import RED, GREEN, YELLOW, BLUE, RESET
-from .sum_check import stringify
+from .utils import RED, GREEN, YELLOW, BLUE, RESET, TerminalOutput, out
+from .sumcheck import stringify
 import numpy as np
 from itertools import product
 from sympy import symbols, Poly, isprime
@@ -11,7 +11,6 @@ from sympy.polys.domains.finitefield import FiniteField
 from sympy.core.numbers import Integer
 from sympy.core.symbol import Symbol
 
-from .terminal_output import TerminalOutput, out
 
 """
 CONSTRUCTING MLE

@@ -9,9 +9,9 @@ import re
 import pydot
 from networkx.drawing.nx_pydot import from_pydot
 from collections import defaultdict
-from .utils import print_header, RED, GREEN, YELLOW, PINK, RESET
+from .utils import print_header, RED, GREEN, YELLOW, PINK, RESET, TerminalOutput, out
 import random
-from .multilinear_extensions import multilinear_extension
+from .mle import multilinear_extension
 from graphviz import Digraph
 import networkx as nx
 import os
@@ -20,8 +20,6 @@ import tempfile
 import subprocess
 from pathlib import Path
 import shutil
-from .terminal_output import TerminalOutput, out
-
 
 
 class ArithmeticCircuit:

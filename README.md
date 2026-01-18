@@ -94,7 +94,7 @@ You can use either **conda** or **pip + venv**. Conda is recommended if you want
 
 ```bash
 conda env create -f environment.yaml
-conda activate zknotes
+conda activate gkr
 ```
 
 #### Option B: pip + venv
@@ -173,12 +173,13 @@ The notebooks can import the package directly; no additional initialization is r
 * The package also installs a small CLI entry point:
 
   ```bash
-  zknotes
+  gkr
   ```
 
   (This will expand over time.)
 
-* Visualization features depend on Graphviz being available on your system. If you encounter rendering errors, verify that `dot` is accessible from the command line.
+* Visualization features depend on Graphviz being available on your.venv\Scripts\activate
+ system. If you encounter rendering errors, verify that `dot` is accessible from the command line.
 
 ---
 ## License

@@ -1,4 +1,4 @@
-name: zknotes
+name: gkr
 dependencies:
   - python>=3.10
   - pip

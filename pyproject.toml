@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "zknotes"
+name = "gkr"
 version = "0.1.0"
-description = "Interactive zero-knowledge proof notebooks + utilities"
+description = "Interactive GKR + sumcheck notebooks + utilities"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
@@ -29,7 +29,7 @@ notebook = [
 ]
 
 [project.scripts]
-zknotes = "zknotes._cli:main"
+zknotes = "gkr._cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

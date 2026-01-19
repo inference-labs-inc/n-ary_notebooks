@@ -72,7 +72,7 @@ class ArithmeticCircuit:
         - Verify Thaler's identity or the propagation equation.
     """
 
-    def __init__(self, *expr_strings: Optional[str], prime: int, out: TerminalOutput = out):
+    def __init__(self, *expr_strings: str, prime: int, out: TerminalOutput = out):
         self.out = out
         # 0. Underlying field, which must be a prime field
         if not isprime(prime):
@@ -88,12 +88,12 @@ class ArithmeticCircuit:
         # 3. Check if the graph is a DAG
         self.is_dag = nx.is_directed_acyclic_graph(self.networkx_circuit_machine_ID)
         if not self.is_dag:
-            out.print(f"\nWARNING: The purported circuit is not a directed acyclic graph. It therefore does not model a well-defined computation.\n")
+            self.out.print(f"\nWARNING: The purported circuit is not a directed acyclic graph. It therefore does not model a well-defined computation.\n")
 
         # 4. Check if all non-source nodes have fan-in of 2
         self.fan_in_two = check_fan_in_two(self.networkx_circuit_machine_ID)
         if not self.fan_in_two:
-            out.print(f"\nWARNING: The circuit contains gates with a fan-in not equal to 2. The mathematical results and proofs may not be valid for this configuration.\n")
+            self.out.print(f"\nWARNING: The circuit contains gates with a fan-in not equal to 2. The mathematical results and proofs may not be valid for this configuration.\n")
 
         # 5. Size of the graph (number of nodes)
         self.size = self.networkx_circuit_machine_ID.number_of_nodes()
@@ -121,13 +121,13 @@ class ArithmeticCircuit:
         try:
             self.W_dict, self.add_dict, self.mult_dict = construct_W_and_wiring_dicts(self.networkx_circuit_machine_ID, self.node_dict, self.layers,self.field.mod)
         except Exception as e:
-            out.print(f"Unable to construct gate values or wiring predicates: {e}")
+            self.out.print(f"Unable to construct gate values or wiring predicates: {e}")
         # Now create the actual functions and their multilinear extensions
         try:
             self.W, self.tilde_W = generate_layer_functions_and_extensions(self.W_dict, self.field,multilinear_extension)
             self.add, self.tilde_add, self.mult, self.tilde_mult = generate_add_mult_functions_and_extensions(self.add_dict, self.mult_dict, self.field, multilinear_extension)
         except Exception as e:
-            out.print(f"Unable to construct multilinear extensions of gate values or wiring predicates: {e}.")
+            self.out.print(f"Unable to construct multilinear extensions of gate values or wiring predicates: {e}.")
 
     def view(
         self,
@@ -195,8 +195,7 @@ class ArithmeticCircuit:
 
         return rendered_path
 
-    @staticmethod
-    def _open_path(path: Path) -> None:
+    def _open_path(self, path: Path) -> None:
         """
         Open a file path in the OS default application.
         """
@@ -218,8 +217,8 @@ class ArithmeticCircuit:
         if not self.is_dag:
             raise ValueError(f"{RED}\nThe provided graph is not a directed acyclic graph (DAG).{RESET}\n")
 
-        print_header(f"{PINK}Topological ordering{RESET}\n", level=2, out=out)
-        out.print(f" {YELLOW}->{RESET} ".join(self.topological_ordering))
+        print_header(f"{PINK}Topological ordering{RESET}\n", level=2, out=self.out)
+        self.out.print(f" {YELLOW}->{RESET} ".join(self.topological_ordering))
 
     def print_gate_values(self) -> None:
         """
@@ -231,7 +230,7 @@ class ArithmeticCircuit:
         """
         Prints nonzero wiring predicates
         """
-        print_add_mult_dicts(self.add_dict, self.mult_dict)
+        print_add_mult_dicts(self.add_dict, self.mult_dict, W_dict=self.W_dict, out=self.out)
 
     def print_tilde_W(self):
         """
@@ -240,7 +239,7 @@ class ArithmeticCircuit:
         print_multilinear_extensions(self.W_dict, self.tilde_W)
 
     def print_wiring_predicate_mles(self):
-        print_header("Multlinear extensions of wiring predicates: ADD\n", level=2, out=out)
+        print_header("Multlinear extensions of wiring predicates: ADD\n", level=2, out=self.out)
 
         tilde_add = self.tilde_add
         tilde_mult = self.tilde_mult
@@ -257,10 +256,10 @@ class ArithmeticCircuit:
             out.print(f"{LHS} = {RHS}")
             out.print("")
 
-        print_header("Multlinear extensions of wiring predicates: MULT\n", level=2, out=out)
+        print_header("Multlinear extensions of wiring predicates: MULT\n", level=2, out=self.out)
 
         for i in reversed(sorted(tilde_mult.keys())):
-            out.print(f"Layer {i}\n".upper())
+            self.out.print(f"Layer {i}\n".upper())
             v = len(next(iter(W_dict[i].keys())))
             w = len(next(iter(W_dict[i + 1].keys())))
             formatted_input = ','.join(
@@ -288,10 +287,10 @@ class ArithmeticCircuit:
 
         if mle:
             W, W_dict, add, mult, F = self.tilde_W, self.W_dict, self.tilde_add, self.tilde_mult, self.field
-            print_header(f"Verification of Thaler's identity\n", level=2, out=out)
+            print_header(f"Verification of Thaler's identity\n", level=2, out=self.out)
         else:
             W, W_dict, add, mult, F = self.W, self.W_dict, self.add, self.mult, self.field
-            print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2, out=out)
+            print_header(f"Verification of layer-wise gate-value propagation equation\n", level=2, out=self.out)
 
         # Field size p (GF(p))
         p = int(self.field.mod)
@@ -556,7 +555,7 @@ def create_arithmetic_circuit(*expr_strings: str) -> Digraph:
         Digraph: The graph object representing the arithmetic circuits.
     """
     # Initialize the graph
-    graph = Digraph(comment="Arithmetic Circuit", format="png")
+    graph = Digraph(comment="Arithmetic Circuit", format="svg")
     graph.attr(rankdir="BT")  # Set the graph direction from bottom to top
 
     # Loop over each expression string
@@ -1108,7 +1107,11 @@ def print_W_dict(W_dict: Dict[int, Dict[tuple, int]], *, out: TerminalOutput = o
 def flatten_inner_tuples(lst):
     return [tuple(item if not isinstance(item, tuple) else item for sub in t for item in (sub if isinstance(sub, tuple) else [sub])) for t in lst]
 
-def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], mult_dict: Dict[int, Dict[tuple, int]], *, out: TerminalOutput = out,) -> None:
+def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], 
+                         mult_dict: Dict[int, Dict[tuple, int]], 
+                         *, 
+                         W_dict: Optional[Dict[int, Dict[tuple, Any]]] = None,
+                         out: TerminalOutput = out,) -> None:
     """
     Prints the add_dict and mult_dict in a structured format, layer by layer.
     Only entries where the value is 1 are printed.
@@ -1133,6 +1136,13 @@ def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], mult_dict: Dict[
             flattened_keys = flatten_inner_tuples(filtered_keys)
             result[layer] = sorted(flattened_keys)
         return result
+    
+    def _vw_for_layer(layer: int) -> Tuple[int, int]:
+        if W_dict is None:
+            raise ValueError("W_dict is required to format keys as (z),(x),(y) with correct dimensions.")
+        v = len(next(iter(W_dict[layer].keys())))
+        w = len(next(iter(W_dict[layer + 1].keys())))
+        return v, w
 
     # Filter and sort both dictionaries
     add_dict_sorted = filter_and_sort_dict(add_dict)
@@ -1140,21 +1150,37 @@ def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]], mult_dict: Dict[
 
     # Print add_dict
     print_header("Addition Wiring Predicates (nonzero values)\n", level=2, out=out)
+
     for layer, keys in add_dict_sorted.items():
         out.print(f"Layer {layer}\n".upper())
+        v, w = _vw_for_layer(layer)
         for key in keys:
-            formatted_key = ','.join(map(str, key))
+            if len(key) != v + 2 * w:
+                raise ValueError(f"Expected key length {v + 2*w} for layer {layer}, got {len(key)}: {key}")
+            z = key[:v]
+            x = key[v : v + w]
+            y = key[v + w : v + 2 * w]
+            formatted_key = f"({','.join(map(str, z))}),({','.join(map(str, x))}),({','.join(map(str, y))})"
             out.print(f"add_{layer}({formatted_key}) = 1")
+
         out.print("")  # Add spacing between layers
 
     # Print mult_dict
     print_header("Multiplication Wiring Predicates (nonzero values)\n", level=2, out=out)
+
     for layer, keys in mult_dict_sorted.items():
         out.print(f"Layer {layer}\n".upper())
+        v, w = _vw_for_layer(layer)
         for key in keys:
-            formatted_key = ','.join(map(str, key))
+            if len(key) != v + 2 * w:
+                raise ValueError(f"Expected key length {v + 2*w} for layer {layer}, got {len(key)}: {key}")
+            z = key[:v]
+            x = key[v : v + w]
+            y = key[v + w : v + 2 * w]
+            formatted_key = f"({','.join(map(str, z))}),({','.join(map(str, x))}),({','.join(map(str, y))})"
             out.print(f"mult_{layer}({formatted_key}) = 1")
-        out.print("")  # Add spacing between layers
+
+    out.print("")  # Add spacing between layers
 
 def generate_layer_functions_and_extensions(
     W_dict: Dict[int, Dict[Tuple[int, ...], int]],
@@ -1317,44 +1343,37 @@ def print_multilinear_extensions(
         # Print the formatted output
         out.print(f"W\u0303_{i}({formatted_tuple}) = {tilde_W[i].as_expr()}\n")
 
-
 def replace_symbols_in_polynomial(poly: Poly, v: int, w: int) -> Poly:
     """
     Replace the symbols in a SymPy polynomial.
 
-    Args:
-        poly (Poly): The input polynomial.
-        v (int): Number of symbols to replace with z_j (starting at j = 0).
-        w (int): Number of symbols to replace with x_j and y_j (starting at j = 0 for each).
-
-    Returns:
-        Poly: A new polynomial with replaced symbols.
+    Assumes poly.gens are ordered as:
+      first v gens  -> z_0..z_{v-1}
+      next w gens   -> x_0..x_{w-1}
+      next w gens   -> y_0..y_{w-1}
     """
-    # Extract symbols from the polynomial
     original_symbols = list(poly.gens)
 
-    # Generate new symbols
-    z_symbols = [symbols(f"z_{j}") for j in range(v)]
-    x_symbols = [symbols(f"x_{j}") for j in range(w)]
-    y_symbols = [symbols(f"y_{j}") for j in range(w)]
+    z_symbols = list(symbols(f"z_:{v}"))
+    x_symbols = list(symbols(f"x_:{w}"))
+    y_symbols = list(symbols(f"y_:{w}"))
+    new_gens = z_symbols + x_symbols + y_symbols
 
-    # Create a mapping of original symbols to new symbols
-    replacement_map = {}
+    expected = v + 2 * w
+    if len(original_symbols) != expected:
+        raise ValueError(
+            f"Expected {expected} generators (v + 2w), got {len(original_symbols)}: {original_symbols}"
+        )
 
-    for i, sym in enumerate(original_symbols):
-        if i < v:
-            replacement_map[sym] = z_symbols[i]
-        elif v <= i < v + w:
-            replacement_map[sym] = x_symbols[i - v]
-        elif v + w <= i < v + 2 * w:
-            replacement_map[sym] = y_symbols[i - v - w]
-        else:
-            raise ValueError("Not enough replacements for the given symbols.")
+    replacement_map = {
+        **dict(zip(original_symbols[:v], z_symbols)),
+        **dict(zip(original_symbols[v : v + w], x_symbols)),
+        **dict(zip(original_symbols[v + w : v + 2 * w], y_symbols)),
+    }
 
-    # Create a new polynomial with the replaced symbols
-    replaced_poly = poly.subs(replacement_map)
+    replaced_expr = poly.as_expr().subs(replacement_map)
+    return Poly(replaced_expr, *new_gens, domain=poly.domain)
 
-    return Poly(replaced_poly, *replacement_map.values())
 
 """
 END: WIRING PREDICATES

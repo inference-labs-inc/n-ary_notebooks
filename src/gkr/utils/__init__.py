@@ -14,6 +14,8 @@ from .display import (
     display_aligned,
     print_header,
     print_header_block,
+    stringify,
+    to_string,
     RED,
     GREEN,
     YELLOW,
@@ -38,6 +40,8 @@ __all__ = [
     "display_aligned",
     "print_header",
     "print_header_block",
+    "stringify",
+    "to_string",
 
     # colors
     "RED",

@@ -4,6 +4,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
+from sympy.polys.domains.modularinteger import ModularInteger
+from sympy.core.symbol import Symbol
+
 import getpass
 import os
 import shutil
@@ -169,6 +172,50 @@ def print_header_block(
         printer(f"{PINK}{line}{RESET}")
     else:
         printer(f"\n{PINK}{t.upper()}{RESET}")
+
+def stringify(*args: Union[Tuple[Symbol], List[Union[str, int, 'ModularInteger']]]) -> str:
+    """
+    Converts one or more coordinate tuples/lists into a single formatted string.
+
+    Args:
+        *args (Union[Tuple[Symbol], List[Union[str, int, ModularInteger]]]):
+              Variable-length arguments of tuples or lists containing coordinates.
+
+    Returns:
+        str: A comma-separated string representation of the coordinates.
+    """
+    result = []
+    for coordinates in args:
+        if not coordinates:
+            continue  # Skip empty coordinates
+
+        # Convert each element in the coordinates to a string
+        coordinates_str = [to_string(c) for c in coordinates]
+
+        # Join the coordinates with commas and add to the result list
+        result.append(', '.join(coordinates_str))
+
+    # Return all coordinate strings joined with commas
+    return ', '.join(result)
+
+
+def to_string(c):
+    """
+    Converts an element to its string representation based on its type.
+
+    Args:
+        c: The element to be converted (could be a Symbol, ModularInteger, or int).
+
+    Returns:
+        str: The string representation of the element.
+    """
+    if isinstance(c, Symbol):
+        return str(c)  # Convert Symbol to string
+    if isinstance(c, ModularInteger):
+        return str(int(c))  # Convert ModularInteger to int, then to string
+    if isinstance(c, int):
+        return str(c)  # Convert int to string
+    return str(c)  # Default conversion to string
 
 
 # ----------------------------

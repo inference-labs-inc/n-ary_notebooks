@@ -178,8 +178,7 @@ The notebooks can import the package directly; no additional initialization is r
 
   (This will expand over time.)
 
-* Visualization features depend on Graphviz being available on your.venv\Scripts\activate
- system. If you encounter rendering errors, verify that `dot` is accessible from the command line.
+* Visualization features depend on Graphviz being available on your system. If you encounter rendering errors, verify that `dot` is accessible from the command line.
 
 ---
 ## License

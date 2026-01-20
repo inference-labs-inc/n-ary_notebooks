@@ -1152,7 +1152,7 @@ def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]],
     print_header("Addition Wiring Predicates (nonzero values)\n", level=2, out=out)
 
     for layer, keys in add_dict_sorted.items():
-        out.print(f"Layer {layer}\n".upper())
+        out.print(f"\nLayer {layer}\n".upper())
         v, w = _vw_for_layer(layer)
         for key in keys:
             if len(key) != v + 2 * w:
@@ -1169,7 +1169,7 @@ def print_add_mult_dicts(add_dict: Dict[int, Dict[tuple, int]],
     print_header("Multiplication Wiring Predicates (nonzero values)\n", level=2, out=out)
 
     for layer, keys in mult_dict_sorted.items():
-        out.print(f"Layer {layer}\n".upper())
+        out.print(f"\nLayer {layer}\n".upper())
         v, w = _vw_for_layer(layer)
         for key in keys:
             if len(key) != v + 2 * w:

@@ -295,7 +295,9 @@ def sum_check_example(out=out) -> None:
 def sum_check(out=out, 
               *, 
               use_commitment: bool = False,
-              secret_mode: Optional[bool] = None,) -> Optional[bool]:
+              secret_mode: Optional[bool] = None,
+              show_final_check: bool = True,
+              return_final_value: bool = False,) -> Optional[bool]:
     """
     Sets up and initiates the sum-check protocol using user input and interactive choices.
 
@@ -360,19 +362,19 @@ def sum_check(out=out,
     if use_commitment:
         if not user_is_prover:
             opening_selection = out.input(
-                f"\nChoose a, b, or c: About the opened polynomial g, the prover will "
-                f"(a) lie. "
-                f"(b) lie with probability 1/2. "
-                f"(c) not lie.",
+                f"\nChoose a, b, or c: About the opened polynomial g, the prover will be "
+                f"(a) honest. "
+                f"(b) honest with probability 1/2. "
+                f"(c) dishonest.",
                 hidden=secret_mode,
             ).strip().lower()
 
             if opening_selection == "a":
-                dishonest_opening = True
+                dishonest_opening = False
             elif opening_selection == "b":
                 dishonest_opening = bool(random.randint(0, 1))
             else:  # c or anything other than a or b
-                dishonest_opening = False
+                dishonest_opening = True
 
         else:
             # Prover will decide later at opening time.
@@ -383,19 +385,19 @@ def sum_check(out=out,
 
     if not user_is_prover:
         dishonesty_selection = out.input(
-            f"\nChoose a, b, or c: About the value of H (the sum of g over the Boolean hypercube), the prover will "
-            f"(a) lie. "
-            f"(b) lie with probability 1/2. "
-            f"(c) not lie.",
+            f"\nChoose a, b, or c: About the value of H (the sum of g over the Boolean hypercube), the prover will be "
+            f"(a) honest. "
+            f"(b) honest with probability 1/2. "
+            f"(c) dishonest.",
             hidden=secret_mode,
             ).strip().lower()
 
         if dishonesty_selection == "a":
-            dishonest: List[bool] = [True]
+            dishonest: List[bool] = [False]
         elif dishonesty_selection == "b":
             dishonest: List[bool] = [bool(random.randint(0, 1))]
         else: # c or anyhing other than a or b
-            dishonest: List[bool] = [False]
+            dishonest: List[bool] = [True]
 
     # Extract polynomial variables, field, and number of variables
     X = multivariate_init.gens
@@ -423,6 +425,7 @@ def sum_check(out=out,
                                             commit_hash=commit_hash,
                                             dishonest_opening=dishonest_opening,
                                             secret_mode=secret_mode,
+                                            show_final_check=show_final_check,
                                             out=out,)
         if tmp is None:
             return None
@@ -465,6 +468,8 @@ def sum_check(out=out,
         commit_hash=commit_hash,
         dishonest_opening=dishonest_opening,
         secret_mode=secret_mode,
+        return_final_value=return_final_value,
+        show_final_check=show_final_check,
         out=out,
     )
 
@@ -476,48 +481,49 @@ def sum_check(out=out,
         # return False # Possible early return
         pass
 
-    print_header("Ground truth", level=1, out=out)
+    if show_final_check:
+        print_header("Ground truth", level=1, out=out)
 
-    # Truncated display of true g
-    X_ = stringify(multivariate_init.gens)
-    expr_str = str(multivariate_init.as_expr())
-    MAX = 800  # characters
+        # Truncated display of true g
+        X_ = stringify(multivariate_init.gens)
+        expr_str = str(multivariate_init.as_expr())
+        MAX = 800  # characters
 
-    if len(expr_str) > MAX:
-        expr_str = expr_str[:MAX] + " ... (truncated)"
+        if len(expr_str) > MAX:
+            expr_str = expr_str[:MAX] + " ... (truncated)"
 
-    out.print(f"\nTrue polynomial g:\n\ng({X_}) = {expr_str}")
+        out.print(f"\nTrue polynomial g:\n\ng({X_}) = {expr_str}")
 
-    # If commitments were used, clarify opening behavior
-    if use_commitment:
-        out.print("\nCommitment behavior:")
-        if dishonest_opening:
-            out.print(f"\nProver attempted a {RED}dishonest opening{RESET}.")
+        # If commitments were used, clarify opening behavior
+        if use_commitment:
+            out.print("\nCommitment behavior:")
+            if dishonest_opening:
+                out.print(f"\nProver attempted a {RED}dishonest opening{RESET}.")
+            else:
+                out.print(f"\nProver opened the {GREEN}correct polynomial{RESET}.")
+
+        # True value of H
+        out.print(f"\nTrue value of H := sum g(b) over b in {{0,1}}^{v} is: {int(H)}")
+        out.print(f"\nProver claimed that this is equal to: H* = {int(F(H_star))}.")
+
+        if result:
+            out.print(f"\nOutcome: V {GREEN}ACCEPTED{RESET}.")
+            if F(H_star) == F(H):
+                out.print(f"\n{GREEN}This was a TRUE POSITIVE{RESET}: the claim H = H* was correct.")
+            else:
+                out.print(f"\n{RED}This was a FALSE POSITIVE{RESET}: V accepted a false claim (P got lucky).")
         else:
-            out.print(f"\nProver opened the {GREEN}correct polynomial{RESET}.")
+            out.print(f"\nOutcome: V {RED}REJECTED{RESET}.")
+            if F(H_star) == F(H):
+                out.print(f"{YELLOW}\nThis was a FALSE NEGATIVE{RESET}: rejection happened despite a true claim (should be rare unless opening failed / transcript inconsistent).")
+            else:
+                out.print(f"{GREEN}\nThis was a TRUE NEGATIVE{RESET}: V rejected a false claim.")
 
-    # True value of H
-    out.print(f"\nTrue value of H := sum g(b) over b in {{0,1}}^{v} is: {int(H)}")
-    out.print(f"\nProver claimed that this is equal to: H* = {int(F(H_star))}.")
+        out.print("")
 
-    if result:
-        out.print(f"\nOutcome: V {GREEN}ACCEPTED{RESET}.")
-        if F(H_star) == F(H):
-            out.print(f"\n{GREEN}This was a TRUE POSITIVE{RESET}: the claim H = H* was correct.")
-        else:
-            out.print(f"\n{RED}This was a FALSE POSITIVE{RESET}: V accepted a false claim (P got lucky).")
-    else:
-        out.print(f"\nOutcome: V {RED}REJECTED{RESET}.")
-        if F(H_star) == F(H):
-            out.print(f"{YELLOW}\nThis was a FALSE NEGATIVE{RESET}: rejection happened despite a true claim (should be rare unless opening failed / transcript inconsistent).")
-        else:
-            out.print(f"{GREEN}\nThis was a TRUE NEGATIVE{RESET}: V rejected a false claim.")
-
-    out.print("")
-
-    if hasattr(out, "flush"):
-        out.flush()
-    return result
+        if hasattr(out, "flush"):
+            out.flush()
+        return result
 
 @count_calls
 def sum_check_recursion(
@@ -536,6 +542,8 @@ def sum_check_recursion(
     secret_mode: Optional[bool] = None,
     *,
     out: TerminalOutput = out,
+    return_final_value: bool = False,
+    show_final_check: bool = True,
 ) -> bool:
     """
     Recursively executes the rounds of the sum-check protocol, verifying each polynomial claim.
@@ -566,7 +574,8 @@ def sum_check_recursion(
 
     # Initialize field and the challenges list if empty
     F = g.domain
-    r = r or []
+    if r is None:
+        r = []
 
     # Substitute the last element in r into g if r is non-empty
     g = g.subs({g.gens[0]: F(r[-1])}) if r else g
@@ -588,6 +597,7 @@ def sum_check_recursion(
                                  commit_hash=commit_hash,
                                  dishonest_opening=dishonest_opening,
                                  secret_mode=secret_mode,
+                                 show_final_check=show_final_check,
                                  out=out,)
             out.flush()
 
@@ -598,7 +608,14 @@ def sum_check_recursion(
                 return False
             
         # Check if the final evaluated polynomial matches the original claim
-        return H_star == F(g_init.eval({g_init.gens[k]: r_ for k, r_ in enumerate(r)}))
+        ok_final = (H_star == F(g_init.eval({g_init.gens[k]: r_ for k, r_ in enumerate(r)})))
+
+        if return_final_value:
+            # gamma = g*_{v-1}(r_{v-1}), where "g" is the last univariate polynomial
+            gamma = F.convert(int(H_star))
+            return (gamma if ok_final else False)
+        
+        return ok_final
 
     # Define variables for the current polynomial's generators and the number of variables
     X, v = g.gens, len(g.gens)
@@ -635,6 +652,7 @@ def sum_check_recursion(
                                     commit_hash=commit_hash,
                                     dishonest_opening=dishonest_opening,
                                     secret_mode=secret_mode,
+                                    show_final_check=show_final_check,
                                     out=out,)
         if res is False:
             return False
@@ -656,6 +674,7 @@ def sum_check_recursion(
                         commit_hash=commit_hash,
                         dishonest_opening=dishonest_opening,
                         secret_mode=secret_mode,
+                        show_final_check=show_final_check,
                         out=out,)
         if ok is None:
             return None
@@ -687,10 +706,13 @@ def sum_check_recursion(
                                    dishonest=dishonest,
                                    user_is_verifier=user_is_verifier,
                                    user_is_prover=user_is_prover,
+                                   show_steps=show_steps,                                   
                                    use_commitment=use_commitment,
                                    commit_hash=commit_hash,
                                    dishonest_opening=dishonest_opening,
                                    secret_mode=secret_mode,
+                                   return_final_value=return_final_value,
+                                   show_final_check=show_final_check,
                                    out=out,)
     else:
         return False  # Reject if sum-check claim fails
@@ -712,6 +734,7 @@ def sum_check_steps(
     commit_hash: Optional[str] = None,
     dishonest_opening: bool = False, 
     secret_mode: Optional[bool] = None,
+    show_final_check: bool = True,
     *,
     out: TerminalOutput = out,
 ) -> Union[None, bool, Tuple[str, bool], Poly]:
@@ -730,12 +753,17 @@ def sum_check_steps(
     b: List[str] = [f"b_{k}" for k in range(v)]
     X_ = stringify(X)
     b_ = stringify(b)
-    r = r or []
+    if r is None:
+        r = []
 
     # ----------------------------
     # Final verification 
     # ----------------------------
     if final_check and r:
+        if not show_final_check:
+            # For GKR: skip printing/oracle-opening section entirely,
+            # but DO stop here so we don't run "Round v" and index X[v].
+            return True
         print_header("\nFinal check", level=2, out=out)
 
         # "sampled; here r_{v-1} = ..."
@@ -777,30 +805,34 @@ def sum_check_steps(
             if user_is_prover:
                 # Let prover choose what to open with (honest or not).
                 choice = out.input(
-                    "\nPress ENTER to open honestly, or type 'x' to enter a different polynomial to open: ",
-                    hidden=secret_mode,
-                ).strip().lower()
+                        f"\nChoose a, b, or c: About the opened polynomial g, you, as prover, will "
+                        f"(a) be honest. "
+                        f"(b) enter a polynomial (honest or dishonest) yourself. "
+                        f"(c) be dishonest.",
+                        hidden=secret_mode,
+                    ).strip().lower()
 
-                if choice == "x":
+                if choice == "a":
+                    g_open = g_init
+                elif choice == "b":
                     # Prover supplies an opening polynomial (can be dishonest).
                     g_open = choose_polynomial_in_ring(
                     field=F,
                     gens=g_init.gens,
-                    custom_message="\nEnter the polynomial you want to open with:",
+                    custom_message="\nEnter the polynomial you, as prover, want to open with: ",
                     secret_mode_for_poly=bool(secret_mode),
                     out=out,
                     )
                     if g_open is None:
                         out.print(f"\nV {RED}REJECTS{RESET}: no polynomial provided at opening.")
                         return False
+                else:  # c or anything other than a or b
+                    g_open = g_init + F(1)
+
             else:
                 # Non-prover mode: keep your scripted dishonesty.
                 if dishonest_opening:
                     g_open = g_init + F(1)
-
-
-            # if dishonest_opening:
-            #     g_open = g_init + F(1)   # same vars/field, changes constant term
 
             # Optional: if you want to hide that prover chose to lie until the end:
             if not secret_mode and dishonest_opening:
@@ -886,9 +918,9 @@ def sum_check_steps(
 
         if user_is_prover:
             if secret_mode is True:
-                user_H_star = out.input(f"\nAs prover, enter your claim H* for the value of H:", hidden=secret_mode)
+                user_H_star = out.input(f"\nAs prover, enter your claim H* for the value of H: ", hidden=secret_mode)
             else:
-                user_H_star = out.input(f"\nAs prover, enter your claim H* for the value of H (the true value is {int(H_star)}):")
+                user_H_star = out.input(f"\nAs prover, enter your claim H* for the value of H (the true value is {int(H_star)}): ")
             skip = True
             return user_H_star, skip
         else:
@@ -986,7 +1018,7 @@ def sum_check_steps(
             out.print(f"\nWe are unable to suggest a polynomial satisfying (a) and (b)—perhaps no such polynomial exists.")
             out.print(f"\nIf no such polynomial exists, we've been caught in a lie and V will reject immediately.")
 
-        prompt = f"\nEnter 'cancel' to abort, or your g*_{j}({str(X[j])}):"
+        prompt = f"\nType 'cancel' to abort, or your g*_{j}({str(X[j])}): "
         g_0_star = choose_polynomial_with_retries(
             field=F,
             custom_message=prompt,

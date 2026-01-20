@@ -126,9 +126,6 @@ def multilinear_extension(
             term = fb * tilde_beta.subs(b_point)
             tilde_f += term
 
-        # # Convert the final expression to a polynomial
-        # tilde_f = Poly(tilde_f_expr, X, domain=field)
-
         return tilde_f
 
 
